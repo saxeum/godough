@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
 )
 
 func main() {
@@ -26,30 +25,7 @@ func newMux(ui fs.FS) *http.ServeMux {
 
 	// Everything else is the React app: /src/* has no handler here, the built
 	// bundle lives in ui/dist.
-	mux.Handle("GET /", http.FileServerFS(noListing{ui}))
+	mux.Handle("GET /", http.FileServerFS(ui))
 
 	return mux
-}
-
-// noListing hides directories that have no index.html. Without it http.FileServerFS
-// answers a directory URL with a listing of the directory's contents.
-type noListing struct{ fs.FS }
-
-func (f noListing) Open(name string) (fs.File, error) {
-	file, err := f.FS.Open(name)
-	if err != nil {
-		return nil, err
-	}
-
-	info, err := file.Stat()
-	if err != nil || !info.IsDir() {
-		return file, nil
-	}
-
-	if _, err := fs.Stat(f.FS, path.Join(name, "index.html")); err != nil {
-		file.Close()
-		return nil, fs.ErrNotExist
-	}
-
-	return file, nil
 }
