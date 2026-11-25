@@ -97,6 +97,25 @@ CI runs both (`test`, `e2e`) and `master` requires both to merge:
 go test -count=1 ./...     # -count=1: the database is state the test cache cannot see
 ```
 
+## Dependencies
+
+`go.sum` describes the module graph, which is not the same set of modules the
+binary contains: 20 lines there, 16 modules in the graph, 6 linked into the
+binary. These answer the question that matters:
+
+```
+make deps           # modules linked into bin/godough, from its buildinfo
+make deps-image     # the same, read from the binary inside the api image
+make deps-build     # what the build will link              (go list -deps)
+make deps-graph     # the whole graph, test-only included   (go list -m all)
+make why            # why a module is here at all: make why MOD=<module>
+make symbols        # function symbols per module in the binary, largest first
+```
+
+`make symbols` needs an unstripped binary. The image is built with
+`-ldflags="-s -w"`, so `go tool nm` finds no symbol table there — which is why
+`make vuln-binary` exists: it reads the pclntab instead.
+
 ## Layout
 
 ```
