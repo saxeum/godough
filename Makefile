@@ -1,7 +1,8 @@
 BINARY := bin/godough
+DATABASE_URL ?= postgres://godough:snippet@localhost:5432/snippet?sslmode=disable
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test cover vet fmt clean
+.PHONY: help build run db-up db-down db-migrate ui-install ui-dev ui-build test cover vet fmt clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-11s\033[0m %s\n", $$1, $$2}'
@@ -10,7 +11,16 @@ build: ## Compile the server to bin/godough
 	go build -o $(BINARY) ./cmd/web
 
 run: ## Run the server (:4000, serving ui/dist)
-	go run ./cmd/web
+	DATABASE_URL='$(DATABASE_URL)' go run ./cmd/web
+
+db-up: ## Start Postgres (docker compose, :5432)
+	docker compose up -d --wait
+
+db-down: ## Stop Postgres (keeps the volume; -v wipes it)
+	docker compose down
+
+db-migrate: ## Apply migrations/*.sql to the dev database
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < migrations/0001_create_snippets.sql
 
 ui-install: ## Install UI dependencies
 	npm --prefix ui install
