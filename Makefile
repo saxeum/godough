@@ -11,10 +11,10 @@ LOAD_ENV := set -a && . ./.env && set +a
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit cover vet fmt clean db-up stack-up down db-migrate
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet fmt clean db-up stack-up down db-migrate
 
 help: ## Show this help
-	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 # ---- host ---------------------------------------------------------------
 
@@ -43,6 +43,9 @@ clean: ## [host] Remove build output, coverage and UI build
 	rm -rf bin coverage.out coverage.html ui/dist
 
 # ---- host against the postgres container --------------------------------
+
+e2e: ## [docker] End-to-end checks against the running stack (:8080)
+	BASE_URL=$${BASE_URL:-http://localhost:8080} scripts/e2e.sh
 
 test-unit: ## [host] Fast tests, no database, no .env (-short)
 	go test -count=1 -short -v ./...
