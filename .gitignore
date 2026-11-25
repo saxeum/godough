@@ -1,0 +1,21 @@
+# Build output (make build)
+/bin/
+
+# Test binaries
+*.test
+
+# Coverage reports (make test, make cover)
+*.out
+coverage.html
+
+# Compiled artefacts
+*.exe
+*.so
+*.dylib
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Local environment
+.env
