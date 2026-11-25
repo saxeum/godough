@@ -5,6 +5,9 @@ LOAD_ENV := set -a && . ./.env && set +a
 # not touched. The vulnerability database updates itself.
 VULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.10.0
 
+# How many modules to show in `make symbols`.
+N ?= 20
+
 # Every target says where it runs, in the text `make help` prints:
 #
 #   [host]    a process on your machine, reading .env
@@ -15,7 +18,7 @@ VULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.10.0
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-binary fmt clean db-up stack-up down db-migrate
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -39,6 +42,34 @@ ui-build: ## [host] Build the React UI into ui/dist
 
 vet: ## [host] Run go vet
 	go vet ./...
+
+deps: ## [host] Modules linked into bin/godough, from its buildinfo
+	@test -x $(BINARY) || $(MAKE) --no-print-directory -s build
+	@go version -m $(BINARY) | awk '$$1 == "dep" {printf "  %-58s %s\n", $$2, $$3}'
+
+deps-image: ## [docker] The same list, read from the binary inside the api image
+	@cid=$$(docker create godough-api) && \
+	trap 'docker rm $$cid >/dev/null' EXIT && \
+	docker cp $$cid:/godough /tmp/godough-image-$$$$ >/dev/null && \
+	trap 'rm -f /tmp/godough-image-$$$$; docker rm $$cid >/dev/null' EXIT && \
+	go version -m /tmp/godough-image-$$$$ | awk '$$1 == "dep" {printf "  %-58s %s\n", $$2, $$3}'
+
+deps-build: ## [host] Modules whose packages the build needs (go list -deps)
+	@go list -deps -f '{{with .Module}}{{.Path}} {{.Version}}{{end}}' ./cmd/web | grep -v '^$$' | sort -u
+
+deps-graph: ## [host] Every module in the module graph, test-only ones included
+	@go list -m all
+
+why: ## [host] Why a module is in the graph at all: make why MOD=<module>
+	@test -n "$(MOD)" || { echo "usage: make why MOD=<module>"; exit 1; }
+	@go mod why -m $(MOD)
+
+symbols: ## [host] Function symbols per module in bin/godough (needs no strip)
+	@test -x $(BINARY) || $(MAKE) --no-print-directory -s build
+	@go tool nm $(BINARY) | awk '{print $$NF}' \
+		| grep -vE '(^|/)vendor/' \
+		| grep -oE '(github\.com|golang\.org|gopkg\.in)/[^/]+/[^/.]+' \
+		| sort | uniq -c | sort -rn | head -$(N)
 
 vuln: ## [host] Known vulnerabilities reachable from this code (govulncheck)
 	$(VULNCHECK) ./...
