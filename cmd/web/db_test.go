@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -9,7 +10,12 @@ import (
 
 // Needs a migrated database: make db-up db-migrate.
 func TestSnippetsAll(t *testing.T) {
-	pool, err := pgxpool.New(t.Context(), databaseURL())
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
+	}
+
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

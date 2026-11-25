@@ -1,4 +1,5 @@
 BINARY := bin/godough
+LOAD_ENV := set -a && . ./.env && set +a
 
 .DEFAULT_GOAL := help
 .PHONY: help build run db-up db-down db-migrate ui-install ui-dev ui-build test cover vet fmt clean
@@ -9,8 +10,8 @@ help: ## Show this help
 build: ## Compile the server to bin/godough
 	go build -o $(BINARY) ./cmd/web
 
-run: ## Run the server (:4000, serving ui/dist)
-	go run ./cmd/web
+run: ## Run the server, using .env for SNIPPET_ADDR and DATABASE_URL
+	$(LOAD_ENV) && go run ./cmd/web
 
 db-up: ## Start Postgres (docker compose, :5432)
 	docker compose up -d --wait
@@ -30,11 +31,11 @@ ui-dev: ## Run the Vite dev server (:5173, proxies /snippet to :4000)
 ui-build: ## Build the React UI into ui/dist
 	npm --prefix ui run build
 
-test: ## Run the tests, verbose, with coverage
-	go test -v -cover ./...
+test: ## Run the tests, verbose, with coverage (needs .env and a migrated DB)
+	$(LOAD_ENV) && go test -v -cover ./...
 
 cover: ## Write an HTML coverage report to coverage.html
-	go test -coverprofile=coverage.out ./...
+	$(LOAD_ENV) && go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
 vet: ## Run go vet
