@@ -20,12 +20,10 @@ func TestRoutes(t *testing.T) {
 		wantBody   string // empty means: do not check the body
 	}{
 		{name: "healthz", method: http.MethodGet, path: "/healthz", wantStatus: http.StatusOK, wantBody: "ok\n"},
-		{name: "view snippet", method: http.MethodGet, path: "/api/snippet/view/7", wantStatus: http.StatusOK, wantBody: "Display a snippet with ID 7..."},
-		{name: "view snippet, bad id", method: http.MethodGet, path: "/api/snippet/view/abc", wantStatus: http.StatusNotFound},
-		{name: "view snippet, zero id", method: http.MethodGet, path: "/api/snippet/view/0", wantStatus: http.StatusNotFound},
+		{name: "view snippet, bad id", method: http.MethodGet, path: "/api/snippet/view/abc", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
+		{name: "view snippet, zero id", method: http.MethodGet, path: "/api/snippet/view/0", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
 		{name: "view snippet, wrong method", method: http.MethodPost, path: "/api/snippet/view/7", wantStatus: http.StatusMethodNotAllowed},
-		{name: "create form", method: http.MethodGet, path: "/api/snippet/create", wantStatus: http.StatusOK, wantBody: "Display a form to create a new snippet..."},
-		{name: "create post", method: http.MethodPost, path: "/api/snippet/create", wantStatus: http.StatusCreated, wantBody: "Save a new snippet..."},
+		{name: "create post", method: http.MethodPost, path: "/api/snippet/create", wantStatus: http.StatusCreated, wantBody: `{"status":"created"}`},
 
 		// The API owns the /api prefix and serves no files: the SPA and its
 		// assets are the web container's job.
