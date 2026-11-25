@@ -56,11 +56,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
-export const listSnippets = () => request<Snippet[]>('/api/snippets')
+export const listSnippets = () => request<Snippet[]>('/api/snippet')
 
-export const getSnippet = (id: string) => request<Snippet>(`/api/snippet/view/${id}`)
+export const getSnippet = (id: string) => request<Snippet>(`/api/snippet/${id}`)
 
 export const createSnippet = (input: CreateInput) =>
-  request<Snippet>('/api/snippet/create', { method: 'POST', body: JSON.stringify(input) })
+  request<Snippet>('/api/snippet', { method: 'POST', body: JSON.stringify(input) })
 
-export const deleteSnippet = (id: number) => request<void>(`/api/snippet/view/${id}`, { method: 'DELETE' })
+export const deleteSnippet = (id: number) => request<void>(`/api/snippet/${id}`, { method: 'DELETE' })

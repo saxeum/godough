@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,26 +39,27 @@ func TestSnippetsAll(t *testing.T) {
 		t.Fatalf("snippetsAll: %v", err)
 	}
 
-	if len(got) != 3 {
-		t.Fatalf("len(snippets) = %d, want 3", len(got))
+	// The seed rows must be present and in order; other rows may exist, because
+	// this is a real database that a running UI can write to.
+	seeds := []string{"First autumn morning", "Over the wintry forest", "An old silent pond"}
+	var found []string
+	for _, s := range got {
+		if s.ID < 1 {
+			t.Errorf("snippet ID = %d, want >= 1", s.ID)
+		}
+		if !s.Expires.After(s.Created) {
+			t.Errorf("%q: Expires %v is not after Created %v", s.Title, s.Expires, s.Created)
+		}
+		for _, seed := range seeds {
+			if s.Title == seed {
+				found = append(found, seed)
+			}
+		}
 	}
 
 	// created is identical for the seed rows, so the secondary id DESC decides.
-	want := []string{
-		"First autumn morning",
-		"Over the wintry forest",
-		"An old silent pond",
-	}
-	for i, s := range got {
-		if s.Title != want[i] {
-			t.Errorf("snippets[%d].Title = %q, want %q", i, s.Title, want[i])
-		}
-		if s.ID < 1 {
-			t.Errorf("snippets[%d].ID = %d, want >= 1", i, s.ID)
-		}
-		if !s.Expires.After(s.Created) {
-			t.Errorf("snippets[%d]: Expires %v is not after Created %v", i, s.Expires, s.Created)
-		}
+	if !slices.Equal(found, seeds) {
+		t.Errorf("seed rows in order = %v, want %v (all snippets: %d)", found, seeds, len(got))
 	}
 }
 
@@ -100,7 +102,7 @@ func TestSnippetsIndex(t *testing.T) {
 	app := &application{logger: slog.New(slog.DiscardHandler), db: pool}
 
 	rec := httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippets", nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -113,11 +115,17 @@ func TestSnippetsIndex(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("body is not a JSON array of snippets: %v (body %q)", err, rec.Body.String())
 	}
-	if len(got) != 3 {
-		t.Fatalf("len(snippets) = %d, want 3", len(got))
+	// Not a count: the database may hold rows a browser created. The three
+	// seeds must be there, newest first among themselves.
+	var found []string
+	for _, s := range got {
+		if s.Title == "First autumn morning" || s.Title == "Over the wintry forest" || s.Title == "An old silent pond" {
+			found = append(found, s.Title)
+		}
 	}
-	if got[0].Title != "First autumn morning" {
-		t.Errorf("snippets[0].Title = %q, want the newest seed row", got[0].Title)
+	seeds := []string{"First autumn morning", "Over the wintry forest", "An old silent pond"}
+	if !slices.Equal(found, seeds) {
+		t.Errorf("seed rows in order = %v, want %v (all snippets: %d)", found, seeds, len(got))
 	}
 }
 
@@ -126,7 +134,7 @@ func TestSnippetViewJSON(t *testing.T) {
 	app := &application{logger: slog.New(slog.DiscardHandler), db: pool}
 
 	rec := httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet/view/1", nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet/1", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
@@ -142,7 +150,7 @@ func TestSnippetViewJSON(t *testing.T) {
 
 	// A well-formed id that does not exist must be a JSON 404, not a text one.
 	rec = httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet/view/999", nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet/999", nil))
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("missing id: status = %d, want %d", rec.Code, http.StatusNotFound)
@@ -183,7 +191,7 @@ func TestCreateSnippet(t *testing.T) {
 
 	body := `{"Title":"a new haiku","Content":"first line\nsecond line","ExpiresInDays":7}`
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/snippet/create", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/snippet", strings.NewReader(body))
 	app.routes().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
@@ -199,7 +207,7 @@ func TestCreateSnippet(t *testing.T) {
 	if created.ID < 1 {
 		t.Fatalf("created.ID = %d, want >= 1", created.ID)
 	}
-	if want := fmt.Sprintf("/api/snippet/view/%d", created.ID); rec.Header().Get("Location") != want {
+	if want := fmt.Sprintf("/api/snippet/%d", created.ID); rec.Header().Get("Location") != want {
 		t.Errorf("Location = %q, want %q", rec.Header().Get("Location"), want)
 	}
 	if !created.Expires.After(created.Created) {
@@ -208,7 +216,7 @@ func TestCreateSnippet(t *testing.T) {
 
 	// The write has to be visible on the read path, not just in the response.
 	rec = httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/snippet/%d", created.ID), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("read back: status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -245,7 +253,7 @@ func TestCreateSnippetRejects(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/snippet/create", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/api/snippet", strings.NewReader(tt.body))
 			app.routes().ServeHTTP(rec, req)
 
 			if rec.Code != tt.want {
@@ -300,7 +308,7 @@ func TestDeleteSnippet(t *testing.T) {
 	before := snippetCount(t, pool)
 
 	rec := httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/snippet/%d", created.ID), nil))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: status = %d, want %d (body %q)", rec.Code, http.StatusNoContent, rec.Body.String())
 	}
@@ -313,21 +321,21 @@ func TestDeleteSnippet(t *testing.T) {
 
 	// Gone: the read path agrees.
 	rec = httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/snippet/%d", created.ID), nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("read after delete: status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 
 	// Deleting it again is a 404, not a 204: the second call did nothing.
 	rec = httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/snippet/%d", created.ID), nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("second delete: status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 
 	// A malformed id is a 404, not a 500.
 	rec = httptest.NewRecorder()
-	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/snippet/view/abc", nil))
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/snippet/abc", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("malformed id: status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
