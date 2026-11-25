@@ -51,3 +51,28 @@ jobs:
       # -count=1: the database is external state the test cache cannot see.
       - name: Test
         run: go test -count=1 -v -cover ./...
+
+  # The stack as a user sees it: real images, real LB, real database. The
+  # browser half is Chrome from the runner image (REQUIRE_BROWSER=1 makes its
+  # absence a failure rather than a skip).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
+
+      - name: Start the stack
+        run: docker compose up -d --wait --build
+
+      - name: Migrate
+        run: make db-migrate
+
+      - name: End-to-end checks
+        run: REQUIRE_BROWSER=1 make e2e
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop
+        if: always()
+        run: docker compose down -v
