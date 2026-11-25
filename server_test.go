@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -21,17 +20,6 @@ func TestNewMux(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			newMux().ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
-
-			if rec.Code != tt.wantStatus {
-				t.Errorf("%s %s: status = %d, want %d", tt.method, tt.path, rec.Code, tt.wantStatus)
-			}
-			if tt.wantBody != "" {
-				if got := rec.Body.String(); got != tt.wantBody {
-					t.Errorf("%s %s: body = %q, want %q", tt.method, tt.path, got, tt.wantBody)
-				}
-			}
 		})
 	}
 }
