@@ -67,20 +67,34 @@ func run(logger *slog.Logger) error {
 		Addr:              addr,
 		Handler:           app.routes(os.DirFS("ui/dist")),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
+	serveErr := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logger.Error("shutdown", slog.Any("err", err))
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- fmt.Errorf("serve: %w", err)
 		}
 	}()
 
 	logger.Info("starting server", slog.String("addr", addr))
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("serve: %w", err)
+
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+	}
+
+	// Restore default signal handling: a second Ctrl-C kills immediately
+	// instead of waiting out the drain.
+	stop()
+
+	// ListenAndServe has already returned ErrServerClosed; this is the call that
+	// actually waits for in-flight handlers, and db is only closed after it.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
 	}
 
 	logger.Info("server stopped")
