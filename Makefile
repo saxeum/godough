@@ -5,6 +5,9 @@ LOAD_ENV := set -a && . ./.env && set +a
 # not touched. The vulnerability database updates itself.
 VULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.10.0
 
+# Trivy through docker: no install, and the same binary locally and in CI.
+TRIVY := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 image --scanners vuln --quiet
+
 # How many modules to show in `make symbols`.
 N ?= 20
 
@@ -18,7 +21,7 @@ N ?= 20
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -70,6 +73,17 @@ symbols: ## [host] Function symbols per module in bin/godough (needs no strip)
 		| grep -vE '(^|/)vendor/' \
 		| grep -oE '(github\.com|golang\.org|gopkg\.in)/[^/]+/[^/.]+' \
 		| sort | uniq -c | sort -rn | head -$(N)
+
+vuln-images: ## [docker] Fixable HIGH/CRITICAL in both images (builds them first)
+	@docker compose build --quiet api web
+	@for img in godough-api godough-web; do \
+		printf '%s: ' "$$img"; \
+		if out=$$($(TRIVY) --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 "$$img" 2>&1); then \
+			echo ok; \
+		else \
+			echo FAILED; echo "$$out"; exit 1; \
+		fi; \
+	done
 
 vuln: ## [host] Known vulnerabilities reachable from this code (govulncheck)
 	$(VULNCHECK) ./...

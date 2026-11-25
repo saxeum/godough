@@ -1,0 +1,96 @@
+name: security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # The vulnerability databases move without the repository changing, so a green
+  # commit can go red on its own. Without this, the first signal is a blocked PR
+  # at an inconvenient moment.
+  schedule:
+    - cron: "43 18 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Reachability: vulnerable symbols this code can actually call, in the module
+  # graph and the standard library. It cannot see what is in the image.
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v7.1.0, runs on node24
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        run: make vuln
+
+  # Everything in the image: OS packages in the base layer plus the language
+  # packages inside the binaries. Trivy cannot rank reachability; this job and
+  # the one above are deliberately both here because neither subsumes the other.
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # to upload the SARIF results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
+
+      - name: Build the images
+        run: docker compose build api web
+
+      # if: always() on both scans so a failing api scan still scans web, and so
+      # every run uploads both SARIF files.
+      - name: Scan godough-api
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          image-ref: godough-api:latest
+          format: sarif
+          output: trivy-api.sarif
+          severity: HIGH,CRITICAL
+          # Fixable findings only: a CVE with no fixed version cannot be resolved
+          # by anyone and would block every merge until upstream acts. Those are
+          # reported in the SARIF, not gated. See issue #26.
+          ignore-unfixed: true
+          # Without this the action rebuilds the SARIF with *all* severities and
+          # takes the exit code from that run, so UNKNOWN/LOW findings fail the
+          # gate. It has to match --severity or the gate says something else.
+          limit-severities-for-sarif: true
+          exit-code: "1"
+
+      - name: Scan godough-web
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          image-ref: godough-web:latest
+          format: sarif
+          output: trivy-web.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # Without this the action rebuilds the SARIF with *all* severities and
+          # takes the exit code from that run, so UNKNOWN/LOW findings fail the
+          # gate. It has to match --severity or the gate says something else.
+          limit-severities-for-sarif: true
+          exit-code: "1"
+
+      - name: Upload api results
+        if: always()
+        uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3
+        with:
+          sarif_file: trivy-api.sarif
+          category: trivy-api
+
+      - name: Upload web results
+        if: always()
+        uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3
+        with:
+          sarif_file: trivy-web.sarif
+          category: trivy-web
