@@ -9,7 +9,8 @@ import (
 
 func TestNewMux(t *testing.T) {
 	ui := fstest.MapFS{
-		"index.html": &fstest.MapFile{Data: []byte("<h1>snippetbox</h1>")},
+		"index.html":          &fstest.MapFile{Data: []byte("<h1>snippetbox</h1>")},
+		"static/css/main.css": &fstest.MapFile{Data: []byte("body{}")},
 	}
 
 	tests := []struct {
@@ -20,6 +21,9 @@ func TestNewMux(t *testing.T) {
 		wantBody   string // empty means: do not check the body
 	}{
 		{name: "spa index", method: http.MethodGet, path: "/", wantStatus: http.StatusOK, wantBody: "<h1>snippetbox</h1>"},
+		{name: "static file", method: http.MethodGet, path: "/static/css/main.css", wantStatus: http.StatusOK, wantBody: "body{}"},
+		{name: "directory is not listed", method: http.MethodGet, path: "/static/", wantStatus: http.StatusNotFound},
+		{name: "directory without slash", method: http.MethodGet, path: "/static", wantStatus: http.StatusNotFound},
 		{name: "unknown asset", method: http.MethodGet, path: "/nope", wantStatus: http.StatusNotFound},
 		{name: "view snippet", method: http.MethodGet, path: "/snippet/view/7", wantStatus: http.StatusOK, wantBody: "Display a snippet with ID 7..."},
 		{name: "view snippet, bad id", method: http.MethodGet, path: "/snippet/view/abc", wantStatus: http.StatusNotFound},
