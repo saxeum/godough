@@ -1,13 +1,14 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
 )
 
-func TestNewMux(t *testing.T) {
+func TestRoutes(t *testing.T) {
 	ui := fstest.MapFS{
 		"index.html":          &fstest.MapFile{Data: []byte("<h1>snippetbox</h1>")},
 		"static/index.html":   &fstest.MapFile{Data: []byte("<p>static</p>")},
@@ -32,10 +33,12 @@ func TestNewMux(t *testing.T) {
 		{name: "create post", method: http.MethodPost, path: "/snippet/create", wantStatus: http.StatusCreated, wantBody: "Save a new snippet..."},
 	}
 
+	app := &application{logger: slog.New(slog.DiscardHandler)}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			newMux(ui).ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+			app.routes(ui).ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
 
 			if rec.Code != tt.wantStatus {
 				t.Errorf("%s %s: status = %d, want %d", tt.method, tt.path, rec.Code, tt.wantStatus)
