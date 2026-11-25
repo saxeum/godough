@@ -79,7 +79,12 @@ startup with its name.
 make test-unit      # host, no database, no .env (-short)
 make test           # host against the postgres container; fails without it
 make e2e            # against the running stack on :8080
+make vuln           # govulncheck: vulnerabilities reachable from this code
 ```
+
+`make vuln` runs a pinned `govulncheck` via `go run`, so there is nothing to
+install and `go.mod` is untouched; `make vuln-binary` runs the same scan against
+`bin/godough`, which is what the image ships. Both exit non-zero on a finding.
 
 `make test` is deliberately strict: with no database it fails rather than
 skipping, so a green run means the queries ran. `make e2e` checks what a browser
