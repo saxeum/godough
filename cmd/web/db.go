@@ -56,6 +56,18 @@ func (app *application) snippetInsert(ctx context.Context, title, content string
 	return s, nil
 }
 
+// snippetDeleteByID removes one snippet, or reports errNotFound.
+func (app *application) snippetDeleteByID(ctx context.Context, id int) error {
+	tag, err := app.db.Exec(ctx, `DELETE FROM snippets WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete snippet %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
 // snippetGet returns one snippet, or errNotFound.
 func (app *application) snippetGet(ctx context.Context, id int) (snippet, error) {
 	rows, err := app.db.Query(ctx, `

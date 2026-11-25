@@ -42,6 +42,26 @@ func (app *application) snippetView(w http.ResponseWriter, r *http.Request) {
 	app.writeJSON(w, http.StatusOK, snippet)
 }
 
+// snippetDelete removes a snippet. 204, not 200: there is nothing to say back.
+func (app *application) snippetDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < 1 {
+		app.clientError(w, http.StatusNotFound)
+		return
+	}
+
+	if err := app.snippetDeleteByID(r.Context(), id); errors.Is(err, errNotFound) {
+		app.clientError(w, http.StatusNotFound)
+		return
+	} else if err != nil {
+		app.serverError(w, r, err)
+		return
+	}
+
+	app.logger.Info("snippet deleted", "id", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type createRequest struct {
 	Title         string
 	Content       string

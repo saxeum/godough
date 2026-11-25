@@ -48,6 +48,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, fieldErrors)
   }
 
+  // 204 has no body by definition; DELETE is the only caller today.
+  if (res.status === 204) {
+    return undefined as T
+  }
+
   return (await res.json()) as T
 }
 
@@ -57,3 +62,5 @@ export const getSnippet = (id: string) => request<Snippet>(`/api/snippet/view/${
 
 export const createSnippet = (input: CreateInput) =>
   request<Snippet>('/api/snippet/create', { method: 'POST', body: JSON.stringify(input) })
+
+export const deleteSnippet = (id: number) => request<void>(`/api/snippet/view/${id}`, { method: 'DELETE' })
