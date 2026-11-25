@@ -37,7 +37,7 @@ func main() {
 
 	// run owns every resource, so its defers (db.Close) run on the way out.
 	if err := run(logger); err != nil {
-		logger.Error("fatal", slog.Any("err", err))
+		logger.Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
@@ -48,8 +48,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx := context.Background()
 
 	db, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -70,33 +69,30 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	logger.Info("starting server", "addr", addr)
 	serveErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- fmt.Errorf("serve: %w", err)
+			return
 		}
+		logger.Info("stopped serving new connections")
 	}()
 
-	logger.Info("starting server", slog.String("addr", addr))
-
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	select {
 	case err := <-serveErr:
 		return err
-	case <-ctx.Done():
+	case <-sigChan:
 	}
 
-	// Restore default signal handling: a second Ctrl-C kills immediately
-	// instead of waiting out the drain.
-	stop()
+	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownRelease()
 
-	// ListenAndServe has already returned ErrServerClosed; this is the call that
-	// actually waits for in-flight handlers, and db is only closed after it.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-
-	logger.Info("server stopped")
+	logger.Info("graceful shutdown complete")
 	return nil
 }

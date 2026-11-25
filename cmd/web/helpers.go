@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log/slog"
 	"net/http"
 )
 
@@ -11,7 +10,7 @@ func (app *application) serverError(w http.ResponseWriter, r *http.Request, err 
 		uri    = r.URL.RequestURI()
 	)
 
-	app.logger.Error(err.Error(), slog.String("method", method), slog.String("uri", uri))
+	app.logger.Error("server error", "err", err, "method", method, "uri", uri)
 	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 }
 
