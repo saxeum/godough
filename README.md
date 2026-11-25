@@ -66,10 +66,10 @@ startup with its name.
 
 | method | path | |
 |---|---|---|
-| GET | `/api/snippets` | every unexpired snippet, newest first |
-| GET | `/api/snippet/view/{id}` | one snippet, `404` JSON if absent |
-| POST | `/api/snippet/create` | `{Title, Content, ExpiresInDays}` -> `201` + `Location`, `422` with per-field errors |
-| DELETE | `/api/snippet/view/{id}` | `204`, `404` if absent |
+| GET | `/api/snippet` | every snippet, newest first |
+| GET | `/api/snippet/{id}` | one snippet, `404` JSON if absent |
+| POST | `/api/snippet` | `{Title, Content, ExpiresInDays}` -> `201` + `Location`, `422` with per-field errors |
+| DELETE | `/api/snippet/{id}` | `204`, `404` if absent |
 | GET | `/healthz` | liveness: never touches the database |
 | GET | `/readyz` | readiness: pings the database, `503` when it cannot |
 

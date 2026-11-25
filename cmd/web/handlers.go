@@ -110,6 +110,6 @@ func (app *application) snippetCreatePost(w http.ResponseWriter, r *http.Request
 	}
 
 	app.logger.Info("snippet created", "id", s.ID)
-	w.Header().Set("Location", fmt.Sprintf("/api/snippet/view/%d", s.ID))
+	w.Header().Set("Location", fmt.Sprintf("/api/snippet/%d", s.ID))
 	app.writeJSON(w, http.StatusCreated, s)
 }

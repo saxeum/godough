@@ -20,16 +20,23 @@ func TestRoutes(t *testing.T) {
 		wantBody   string // empty means: do not check the body
 	}{
 		{name: "healthz", method: http.MethodGet, path: "/healthz", wantStatus: http.StatusOK, wantBody: "ok\n"},
-		{name: "view snippet, bad id", method: http.MethodGet, path: "/api/snippet/view/abc", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
-		{name: "view snippet, zero id", method: http.MethodGet, path: "/api/snippet/view/0", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
-		{name: "view snippet, wrong method", method: http.MethodPost, path: "/api/snippet/view/7", wantStatus: http.StatusMethodNotAllowed},
+		{name: "view snippet, bad id", method: http.MethodGet, path: "/api/snippet/abc", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
+		{name: "view snippet, zero id", method: http.MethodGet, path: "/api/snippet/0", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
+		{name: "view snippet, wrong method", method: http.MethodPost, path: "/api/snippet/7", wantStatus: http.StatusMethodNotAllowed},
 		// No body: decoding fails before any database work, so this route-level
 		// test needs no database. The insert itself is covered in db_test.go.
-		{name: "create post, no body", method: http.MethodPost, path: "/api/snippet/create", wantStatus: http.StatusBadRequest, wantBody: `{"error":"Bad Request"}`},
+		{name: "create post, no body", method: http.MethodPost, path: "/api/snippet", wantStatus: http.StatusBadRequest, wantBody: `{"error":"Bad Request"}`},
 
 		// The API owns the /api prefix and serves no files: the SPA and its
 		// assets are the web container's job.
 		{name: "unversioned api path", method: http.MethodGet, path: "/snippet/view/7", wantStatus: http.StatusNotFound},
+		// The old shapes are gone, not aliased: a client that remembers them
+		// gets a 404 rather than a silently different answer.
+		{name: "old list path", method: http.MethodGet, path: "/api/snippets", wantStatus: http.StatusNotFound},
+		{name: "old view path", method: http.MethodGet, path: "/api/snippet/view/1", wantStatus: http.StatusNotFound},
+		// "create" now parses as an id: POST is 405 (the path is a resource with
+		// GET/DELETE only), and GET is 404 because "create" is not a number.
+		{name: "old create path", method: http.MethodPost, path: "/api/snippet/create", wantStatus: http.StatusMethodNotAllowed},
 		{name: "no ui at the root", method: http.MethodGet, path: "/", wantStatus: http.StatusNotFound},
 		{name: "no static files", method: http.MethodGet, path: "/static/css/main.css", wantStatus: http.StatusNotFound},
 	}

@@ -8,10 +8,10 @@ func (app *application) routes() *http.ServeMux {
 	mux.HandleFunc("GET /healthz", app.healthz)
 	mux.HandleFunc("GET /readyz", app.readyz)
 
-	mux.HandleFunc("GET /api/snippets", app.snippetsIndex)
-	mux.HandleFunc("GET /api/snippet/view/{id}", app.snippetView)
-	mux.HandleFunc("DELETE /api/snippet/view/{id}", app.snippetDelete)
-	mux.HandleFunc("POST /api/snippet/create", app.snippetCreatePost)
+	mux.HandleFunc("GET /api/snippet", app.snippetsIndex)
+	mux.HandleFunc("GET /api/snippet/{id}", app.snippetView)
+	mux.HandleFunc("DELETE /api/snippet/{id}", app.snippetDelete)
+	mux.HandleFunc("POST /api/snippet", app.snippetCreatePost)
 
 	return mux
 }

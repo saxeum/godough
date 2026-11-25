@@ -43,16 +43,19 @@ print($3)
 echo "# $BASE_URL"
 
 # --- the API ---------------------------------------------------------------
-expect_status "api: list" "/api/snippets" 200
-ctype=$(content_type "/api/snippets")
+expect_status "api: list" "/api/snippet" 200
+ctype=$(content_type "/api/snippet")
 [ "$ctype" = "application/json" ] && pass "api: list content-type" || fail "api: list content-type" "got $ctype"
-expect_json "api: list is 3 snippets, newest first" "/api/snippets" \
-  "len(d) == 3 and d[0]['Title'] == 'First autumn morning' and d[-1]['Title'] == 'An old silent pond'"
-expect_json "api: one snippet" "/api/snippet/view/1" "d['ID'] == 1 and d['Title'] == 'An old silent pond'"
-expect_status "api: malformed id is 404" "/api/snippet/view/abc" 404
-expect_json "api: malformed id is a JSON error" "/api/snippet/view/abc" "d.get('error') == 'Not Found'"
-expect_status "api: missing id is 404" "/api/snippet/view/999" 404
-expect_status "api: wrong method is 405" "/api/snippet/view/1" 405 POST
+# Not a count: this database is shared with a running UI, so other rows may
+# exist. The three seed rows must be present, newest first among themselves.
+SEEDS="('First autumn morning', 'Over the wintry forest', 'An old silent pond')"
+expect_json "api: list has the seed snippets, newest first" "/api/snippet" \
+  "[t for t in (x['Title'] for x in d) if t in $SEEDS] == list($SEEDS)"
+expect_json "api: one snippet" "/api/snippet/1" "d['ID'] == 1 and d['Title'] == 'An old silent pond'"
+expect_status "api: malformed id is 404" "/api/snippet/abc" 404
+expect_json "api: malformed id is a JSON error" "/api/snippet/abc" "d.get('error') == 'Not Found'"
+expect_status "api: missing id is 404" "/api/snippet/999" 404
+expect_status "api: wrong method is 405" "/api/snippet/1" 405 POST
 
 # --- the web container behind the LB ---------------------------------------
 expect_status "web: index" "/" 200
@@ -117,13 +120,13 @@ probe_id=""
 probe_alive=0
 cleanup_probe() {
   if [ "$probe_alive" = "1" ]; then
-    curl -s -o /dev/null -X DELETE "$BASE_URL/api/snippet/view/$probe_id"
+    curl -s -o /dev/null -X DELETE "$BASE_URL/api/snippet/$probe_id"
   fi
   true
 }
 trap cleanup_probe EXIT
 
-resp=$(curl -s -X POST "$BASE_URL/api/snippet/create" -H 'Content-Type: application/json' \
+resp=$(curl -s -X POST "$BASE_URL/api/snippet" -H 'Content-Type: application/json' \
   -d "{\"Title\":\"e2e probe $$\",\"Content\":\"created by scripts/e2e.sh\",\"ExpiresInDays\":1}")
 probe_id=$(printf '%s' "$resp" | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("ID") or "")
@@ -132,11 +135,12 @@ except Exception: print("")' 2>/dev/null)
 if [ -n "$probe_id" ]; then
   probe_alive=1
   pass "api: create a snippet (id $probe_id)"
-  expect_status "api: the created snippet is readable" "/api/snippet/view/$probe_id" 200
-  expect_status "api: delete the snippet" "/api/snippet/view/$probe_id" 204 DELETE
+  expect_status "api: the created snippet is readable" "/api/snippet/$probe_id" 200
+  expect_status "api: delete the snippet" "/api/snippet/$probe_id" 204 DELETE
   probe_alive=0
-  expect_status "api: the deleted snippet is gone" "/api/snippet/view/$probe_id" 404
-  expect_json "api: list is back to 3 after the round-trip" "/api/snippets" "len(d) == 3"
+  expect_status "api: the deleted snippet is gone" "/api/snippet/$probe_id" 404
+  expect_json "api: the probe is gone from the list" "/api/snippet" \
+    "not any(x['Title'] == 'e2e probe $$' for x in d)"
 else
   fail "api: create a snippet" "no ID came back: $resp"
 fi
