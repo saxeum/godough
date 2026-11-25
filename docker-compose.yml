@@ -6,9 +6,10 @@ services:
       POSTGRES_PASSWORD: snippet
       POSTGRES_DB: snippet
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U godough -d snippet"]
       interval: 5s

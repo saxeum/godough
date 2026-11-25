@@ -10,7 +10,7 @@ import (
 )
 
 // defaultDSN matches the dev database in docker-compose.yml.
-const defaultDSN = "postgres://godough:snippet@localhost:5432/snippet?sslmode=disable"
+const defaultDSN = "postgres://godough_app:snippet_app@localhost:5432/snippet?sslmode=disable"
 
 func databaseURL() string {
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
