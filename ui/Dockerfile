@@ -1,5 +1,5 @@
 # Web image: the built SPA, served by nginx. It knows nothing about the API.
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 
 WORKDIR /ui
 COPY package.json package-lock.json ./
