@@ -9,6 +9,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// defaultDSN matches the dev database in docker-compose.yml.
+const defaultDSN = "postgres://godough:snippet@localhost:5432/snippet?sslmode=disable"
+
+func databaseURL() string {
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		return dsn
+	}
+	return defaultDSN
+}
+
 type application struct {
 	logger *slog.Logger
 	db     *pgxpool.Pool
@@ -22,14 +32,8 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		logger.Error("DATABASE_URL is not set")
-		os.Exit(1)
-	}
-
 	ctx := context.Background()
-	db, err := pgxpool.New(ctx, dsn)
+	db, err := pgxpool.New(ctx, databaseURL())
 	if err != nil {
 		logger.Error("open database", slog.Any("err", err))
 		os.Exit(1)

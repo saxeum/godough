@@ -1,5 +1,4 @@
 BINARY := bin/godough
-DATABASE_URL ?= postgres://godough:snippet@localhost:5432/snippet?sslmode=disable
 
 .DEFAULT_GOAL := help
 .PHONY: help build run db-up db-down db-migrate ui-install ui-dev ui-build test cover vet fmt clean
@@ -11,7 +10,7 @@ build: ## Compile the server to bin/godough
 	go build -o $(BINARY) ./cmd/web
 
 run: ## Run the server (:4000, serving ui/dist)
-	DATABASE_URL='$(DATABASE_URL)' go run ./cmd/web
+	go run ./cmd/web
 
 db-up: ## Start Postgres (docker compose, :5432)
 	docker compose up -d --wait
