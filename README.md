@@ -91,7 +91,10 @@ sees the OS packages in a base layer. All exit non-zero on a finding.
 
 CI runs `make vuln` and the two image scans on every pull request, and weekly on
 a schedule, because the vulnerability databases change without the repository
-doing so. The image gate blocks on *fixable* HIGH/CRITICAL only: a CVE with no
+doing so. Dependabot opens grouped weekly PRs for `gomod`, `npm`, `docker` and
+`github-actions`; nothing auto-merges, so every bump runs the four required
+checks like any other change. The npm one matters because the built bundle has no
+lockfile inside the image, which is the one surface Trivy cannot see. The image gate blocks on *fixable* HIGH/CRITICAL only: a CVE with no
 fixed version cannot be resolved by anyone, so it is reported, not gated.
 
 `make test` is deliberately strict: with no database it fails rather than

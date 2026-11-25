@@ -1,0 +1,59 @@
+version: 2
+
+# Routine version updates. Security advisories already produce PRs through
+# Dependabot alerts; this covers the bumps nobody is told about, and the two
+# surfaces the gates cannot see: the npm packages bundled into ui/dist, and the
+# base image tags.
+#
+# Nothing here auto-merges. Every PR runs test, e2e, vuln and images, so a bump
+# that breaks the build or drags in a vulnerability cannot reach master.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go:
+        patterns: ["*"]
+
+  # Trivy sees only os-pkgs in the web image (the bundle has no lockfile), so
+  # this is the only automated signal for a react or react-router advisory.
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
+
+  # The api image: golang and distroless.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      docker-api:
+        patterns: ["*"]
+
+  # The web image: node and nginx-unprivileged.
+  - package-ecosystem: docker
+    directory: /ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      docker-web:
+        patterns: ["*"]
+
+  # The pinned SHAs in ci.yml and security.yml.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
