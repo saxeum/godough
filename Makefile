@@ -1,6 +1,10 @@
 BINARY := bin/godough
 LOAD_ENV := set -a && . ./.env && set +a
 
+# Pinned, and run with `go run` so nothing has to be installed and go.mod is
+# not touched. The vulnerability database updates itself.
+VULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.10.0
+
 # Every target says where it runs, in the text `make help` prints:
 #
 #   [host]    a process on your machine, reading .env
@@ -11,7 +15,7 @@ LOAD_ENV := set -a && . ./.env && set +a
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet fmt clean db-up stack-up down db-migrate
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-binary fmt clean db-up stack-up down db-migrate
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -35,6 +39,12 @@ ui-build: ## [host] Build the React UI into ui/dist
 
 vet: ## [host] Run go vet
 	go vet ./...
+
+vuln: ## [host] Known vulnerabilities reachable from this code (govulncheck)
+	$(VULNCHECK) ./...
+
+vuln-binary: ## [host] The same scan on bin/godough, as the image ships it
+	$(VULNCHECK) -mode=binary $(BINARY)
 
 fmt: ## [host] Format all Go files
 	gofmt -l -w .
