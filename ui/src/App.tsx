@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, Route, Routes, useParams } from 'react-router-dom'
-import { getSnippet, listSnippets, type Snippet } from './api'
+import { ApiError, getSnippet, listSnippets, type Snippet } from './api'
+import CreateSnippet from './CreateSnippet'
 
-type State<T> = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'ok'; data: T }
+type State<T> = { status: 'loading' } | { status: 'failed'; error: Error } | { status: 'ok'; data: T }
 
 // useFetched runs load() once per key change and keeps the three states a
 // fetch can be in, so each page below only renders what it got.
@@ -14,7 +15,7 @@ function useFetched<T>(load: () => Promise<T>, key: unknown): State<T> {
     setState({ status: 'loading' })
     load().then(
       (data) => current && setState({ status: 'ok', data }),
-      (err: Error) => current && setState({ status: 'failed', message: err.message }),
+      (error: Error) => current && setState({ status: 'failed', error }),
     )
     return () => {
       current = false
@@ -37,7 +38,7 @@ function SnippetList() {
   const state = useFetched(listSnippets, 'list')
 
   if (state.status === 'loading') return <Message>Loading…</Message>
-  if (state.status === 'failed') return <Message>Could not load snippets: {state.message}</Message>
+  if (state.status === 'failed') return <Message>Could not load snippets: {state.error.message}</Message>
   if (state.data.length === 0) return <Message>No snippets yet.</Message>
 
   return (
@@ -64,7 +65,8 @@ function SnippetView() {
 
   if (state.status === 'loading') return <Message>Loading…</Message>
   if (state.status === 'failed') {
-    return state.message === 'not found' ? <Message>That snippet does not exist.</Message> : <Message>Could not load the snippet: {state.message}</Message>
+    const missing = state.error instanceof ApiError && state.error.status === 404
+    return missing ? <Message>That snippet does not exist.</Message> : <Message>Could not load the snippet: {state.error.message}</Message>
   }
 
   const s: Snippet = state.data
@@ -93,9 +95,11 @@ function App() {
       </header>
       <nav>
         <Link to="/">Home</Link>
+        <Link to="/snippet/create">New snippet</Link>
       </nav>
       <Routes>
         <Route path="/" element={<SnippetList />} />
+        <Route path="/snippet/create" element={<CreateSnippet />} />
         <Route path="/snippet/:id" element={<SnippetView />} />
         <Route path="*" element={<Message>Page not found.</Message>} />
       </Routes>

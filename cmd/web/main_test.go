@@ -23,7 +23,9 @@ func TestRoutes(t *testing.T) {
 		{name: "view snippet, bad id", method: http.MethodGet, path: "/api/snippet/view/abc", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
 		{name: "view snippet, zero id", method: http.MethodGet, path: "/api/snippet/view/0", wantStatus: http.StatusNotFound, wantBody: `{"error":"Not Found"}`},
 		{name: "view snippet, wrong method", method: http.MethodPost, path: "/api/snippet/view/7", wantStatus: http.StatusMethodNotAllowed},
-		{name: "create post", method: http.MethodPost, path: "/api/snippet/create", wantStatus: http.StatusCreated, wantBody: `{"status":"created"}`},
+		// No body: decoding fails before any database work, so this route-level
+		// test needs no database. The insert itself is covered in db_test.go.
+		{name: "create post, no body", method: http.MethodPost, path: "/api/snippet/create", wantStatus: http.StatusBadRequest, wantBody: `{"error":"Bad Request"}`},
 
 		// The API owns the /api prefix and serves no files: the SPA and its
 		// assets are the web container's job.

@@ -37,6 +37,25 @@ func (app *application) snippetsAll(ctx context.Context) ([]snippet, error) {
 	return snippets, nil
 }
 
+// snippetInsert writes one snippet and returns the row as the database stored
+// it, so the caller never has to guess at created/expires.
+func (app *application) snippetInsert(ctx context.Context, title, content string, expiresInDays int) (snippet, error) {
+	rows, err := app.db.Query(ctx, `
+		INSERT INTO snippets (title, content, created, expires)
+		VALUES ($1, $2, now(), now() + make_interval(days => $3))
+		RETURNING id, title, content, created, expires`, title, content, expiresInDays)
+	if err != nil {
+		return snippet{}, fmt.Errorf("insert snippet: %w", err)
+	}
+
+	s, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[snippet])
+	if err != nil {
+		return snippet{}, fmt.Errorf("collect inserted snippet: %w", err)
+	}
+
+	return s, nil
+}
+
 // snippetGet returns one snippet, or errNotFound.
 func (app *application) snippetGet(ctx context.Context, id int) (snippet, error) {
 	rows, err := app.db.Query(ctx, `

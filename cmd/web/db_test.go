@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -172,4 +175,113 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 
 	return pool
+}
+
+func TestCreateSnippet(t *testing.T) {
+	pool := testPool(t)
+	app := &application{logger: slog.New(slog.DiscardHandler), db: pool}
+
+	body := `{"Title":"a new haiku","Content":"first line\nsecond line","ExpiresInDays":7}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/snippet/create", strings.NewReader(body))
+	app.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var created snippet
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("body is not a JSON snippet: %v (body %q)", err, rec.Body.String())
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), "DELETE FROM snippets WHERE id = $1", created.ID) })
+
+	if created.ID < 1 {
+		t.Fatalf("created.ID = %d, want >= 1", created.ID)
+	}
+	if want := fmt.Sprintf("/api/snippet/view/%d", created.ID); rec.Header().Get("Location") != want {
+		t.Errorf("Location = %q, want %q", rec.Header().Get("Location"), want)
+	}
+	if !created.Expires.After(created.Created) {
+		t.Errorf("Expires %v is not after Created %v", created.Expires, created.Created)
+	}
+
+	// The write has to be visible on the read path, not just in the response.
+	rec = httptest.NewRecorder()
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read back: status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var read snippet
+	if err := json.Unmarshal(rec.Body.Bytes(), &read); err != nil {
+		t.Fatalf("read back is not JSON: %v", err)
+	}
+	if read.Title != "a new haiku" || read.Content != "first line\nsecond line" {
+		t.Errorf("read back = %+v, want the values that were posted", read)
+	}
+}
+
+func TestCreateSnippetRejects(t *testing.T) {
+	pool := testPool(t)
+	app := &application{logger: slog.New(slog.DiscardHandler), db: pool}
+
+	before := snippetCount(t, pool)
+
+	tests := []struct {
+		name     string
+		body     string
+		want     int
+		wantKeys []string
+	}{
+		{name: "not json", body: `not json`, want: http.StatusBadRequest},
+		{name: "empty title", body: `{"Title":"","Content":"x","ExpiresInDays":7}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"title"}},
+		{name: "title too long", body: `{"Title":"` + strings.Repeat("a", 101) + `","Content":"x","ExpiresInDays":7}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"title"}},
+		{name: "empty content", body: `{"Title":"t","Content":"   ","ExpiresInDays":7}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"content"}},
+		{name: "expiry zero", body: `{"Title":"t","Content":"x","ExpiresInDays":0}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"expiresInDays"}},
+		{name: "expiry too long", body: `{"Title":"t","Content":"x","ExpiresInDays":366}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"expiresInDays"}},
+		{name: "everything missing", body: `{}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"title", "content", "expiresInDays"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/snippet/create", strings.NewReader(tt.body))
+			app.routes().ServeHTTP(rec, req)
+
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
+			}
+
+			if len(tt.wantKeys) == 0 {
+				return
+			}
+
+			var got struct {
+				Errors map[string]string `json:"errors"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("body is not a JSON error map: %v (body %q)", err, rec.Body.String())
+			}
+			for _, k := range tt.wantKeys {
+				if _, ok := got.Errors[k]; !ok {
+					t.Errorf("errors has no %q, got %v", k, got.Errors)
+				}
+			}
+		})
+	}
+
+	// A rejected request must not have written anything.
+	if after := snippetCount(t, pool); after != before {
+		t.Errorf("row count changed from %d to %d: a rejected request inserted", before, after)
+	}
+}
+
+func snippetCount(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+
+	var n int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM snippets").Scan(&n); err != nil {
+		t.Fatalf("count snippets: %v", err)
+	}
+	return n
 }
