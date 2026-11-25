@@ -110,6 +110,37 @@ else
   fi
 fi
 
+# --- lifecycle: create, read, delete ---------------------------------------
+# Unique title so a leftover row from a failed run is identifiable, and a trap
+# so a failure after the create does not poison the next run's row count.
+probe_id=""
+probe_alive=0
+cleanup_probe() {
+  if [ "$probe_alive" = "1" ]; then
+    curl -s -o /dev/null -X DELETE "$BASE_URL/api/snippet/view/$probe_id"
+  fi
+  true
+}
+trap cleanup_probe EXIT
+
+resp=$(curl -s -X POST "$BASE_URL/api/snippet/create" -H 'Content-Type: application/json' \
+  -d "{\"Title\":\"e2e probe $$\",\"Content\":\"created by scripts/e2e.sh\",\"ExpiresInDays\":1}")
+probe_id=$(printf '%s' "$resp" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("ID") or "")
+except Exception: print("")' 2>/dev/null)
+
+if [ -n "$probe_id" ]; then
+  probe_alive=1
+  pass "api: create a snippet (id $probe_id)"
+  expect_status "api: the created snippet is readable" "/api/snippet/view/$probe_id" 200
+  expect_status "api: delete the snippet" "/api/snippet/view/$probe_id" 204 DELETE
+  probe_alive=0
+  expect_status "api: the deleted snippet is gone" "/api/snippet/view/$probe_id" 404
+  expect_json "api: list is back to 3 after the round-trip" "/api/snippets" "len(d) == 3"
+else
+  fail "api: create a snippet" "no ID came back: $resp"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "$checks checks, 0 failed"

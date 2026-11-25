@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, Route, Routes, useParams } from 'react-router-dom'
-import { ApiError, getSnippet, listSnippets, type Snippet } from './api'
+import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { ApiError, deleteSnippet, getSnippet, listSnippets, type Snippet } from './api'
 import CreateSnippet from './CreateSnippet'
 
 type State<T> = { status: 'loading' } | { status: 'failed'; error: Error } | { status: 'ok'; data: T }
@@ -62,6 +62,22 @@ function SnippetList() {
 function SnippetView() {
   const { id = '' } = useParams()
   const state = useFetched(() => getSnippet(id), id)
+  const navigate = useNavigate()
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  async function remove(s: Snippet) {
+    if (!window.confirm(`Delete "${s.Title}"?`)) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await deleteSnippet(s.ID)
+      navigate('/')
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? `Could not delete (${err.status}).` : 'Could not reach the server.')
+      setDeleting(false)
+    }
+  }
 
   if (state.status === 'loading') return <Message>Loading…</Message>
   if (state.status === 'failed') {
@@ -81,6 +97,10 @@ function SnippetView() {
         </div>
         <pre>{s.Content}</pre>
       </div>
+      {deleteError && <p className="error">{deleteError}</p>}
+      <button type="button" onClick={() => remove(s)} disabled={deleting}>
+        {deleting ? 'Deleting…' : 'Delete snippet'}
+      </button>
     </main>
   )
 }

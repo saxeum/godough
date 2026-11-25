@@ -285,3 +285,50 @@ func snippetCount(t *testing.T, pool *pgxpool.Pool) int {
 	}
 	return n
 }
+
+func TestDeleteSnippet(t *testing.T) {
+	pool := testPool(t)
+	app := &application{logger: slog.New(slog.DiscardHandler), db: pool}
+
+	// Make a row to delete rather than deleting a seed row: this test must not
+	// depend on which rows happen to be in the database.
+	created, err := app.snippetInsert(t.Context(), "delete me", "x", 7)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	before := snippetCount(t, pool)
+
+	rec := httptest.NewRecorder()
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: status = %d, want %d (body %q)", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if body := rec.Body.String(); body != "" {
+		t.Errorf("delete: body = %q, want empty", body)
+	}
+	if after := snippetCount(t, pool); after != before-1 {
+		t.Errorf("row count %d -> %d, want one fewer", before, after)
+	}
+
+	// Gone: the read path agrees.
+	rec = httptest.NewRecorder()
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("read after delete: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	// Deleting it again is a 404, not a 204: the second call did nothing.
+	rec = httptest.NewRecorder()
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/snippet/view/%d", created.ID), nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("second delete: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	// A malformed id is a 404, not a 500.
+	rec = httptest.NewRecorder()
+	app.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/snippet/view/abc", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("malformed id: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}

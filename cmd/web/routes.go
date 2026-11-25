@@ -10,6 +10,7 @@ func (app *application) routes() *http.ServeMux {
 
 	mux.HandleFunc("GET /api/snippets", app.snippetsIndex)
 	mux.HandleFunc("GET /api/snippet/view/{id}", app.snippetView)
+	mux.HandleFunc("DELETE /api/snippet/view/{id}", app.snippetDelete)
 	mux.HandleFunc("POST /api/snippet/create", app.snippetCreatePost)
 
 	return mux
