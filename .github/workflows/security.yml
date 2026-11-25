@@ -59,6 +59,10 @@ jobs:
           # by anyone and would block every merge until upstream acts. Those are
           # reported in the SARIF, not gated. See issue #26.
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF with *all* severities and
+          # takes the exit code from that run, so UNKNOWN/LOW findings fail the
+          # gate. It has to match --severity or the gate says something else.
+          limit-severities-for-sarif: true
           exit-code: "1"
 
       - name: Scan godough-web
@@ -71,6 +75,10 @@ jobs:
           output: trivy-web.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF with *all* severities and
+          # takes the exit code from that run, so UNKNOWN/LOW findings fail the
+          # gate. It has to match --severity or the gate says something else.
+          limit-severities-for-sarif: true
           exit-code: "1"
 
       - name: Upload api results
