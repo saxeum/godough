@@ -51,3 +51,35 @@ func TestRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigFromEnv(t *testing.T) {
+	tests := []struct {
+		name      string
+		addr, dsn string
+		wantErr   string
+	}{
+		{name: "both set", addr: ":4000", dsn: "postgres://x"},
+		{name: "addr missing", dsn: "postgres://x", wantErr: "SNIPPET_ADDR is not set"},
+		{name: "dsn missing", addr: ":4000", wantErr: "DATABASE_URL is not set"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SNIPPET_ADDR", tt.addr)
+			t.Setenv("DATABASE_URL", tt.dsn)
+
+			addr, dsn, err := configFromEnv()
+
+			switch {
+			case tt.wantErr != "":
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+			case err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case addr != tt.addr || dsn != tt.dsn:
+				t.Errorf("got (%q, %q), want (%q, %q)", addr, dsn, tt.addr, tt.dsn)
+			}
+		})
+	}
+}
