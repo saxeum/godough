@@ -1,51 +1,69 @@
 BINARY := bin/godough
 LOAD_ENV := set -a && . ./.env && set +a
 
+# Every target says where it runs, in the text `make help` prints:
+#
+#   [host]    a process on your machine, reading .env
+#   [docker]  a container, started by docker compose
+#   [both]    a host process against the postgres container
+#
+# .env is read by host targets only. Compose sets DATABASE_URL itself, because
+# the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
+
 .DEFAULT_GOAL := help
-.PHONY: help build run db-up stack-up down db-migrate ui-install ui-dev ui-build test cover vet fmt clean
+.PHONY: help build run ui-install ui-dev ui-build test test-unit cover vet fmt clean db-up stack-up down db-migrate
 
 help: ## Show this help
-	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-11s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-build: ## Compile the server to bin/godough
+# ---- host ---------------------------------------------------------------
+
+build: ## [host] Compile the API to bin/godough
 	go build -o $(BINARY) ./cmd/web
 
-run: ## Run the API only, using .env (the UI is make ui-dev)
+run: ## [host] Run the API only (:4000, .env; the UI is make ui-dev)
 	$(LOAD_ENV) && go run ./cmd/web
 
-db-up: ## Start Postgres only (:5432)
-	docker compose up -d --wait postgres
-
-stack-up: ## Build and start postgres, api, web and the LB (:8080)
-	docker compose up -d --wait --build
-
-down: ## Stop all containers (keeps the volume; -v wipes it)
-	docker compose down
-
-db-migrate: ## Apply migrations/*.sql to the dev database
-	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < migrations/0001_create_snippets.sql
-
-ui-install: ## Install UI dependencies
+ui-install: ## [host] Install UI dependencies
 	npm --prefix ui install
 
-ui-dev: ## Run the Vite dev server (:5173, proxies /api to :4000)
+ui-dev: ## [host] Run the Vite dev server (:5173, proxies /api to :4000)
 	npm --prefix ui run dev
 
-ui-build: ## Build the React UI into ui/dist
+ui-build: ## [host] Build the React UI into ui/dist
 	npm --prefix ui run build
 
-test: ## Run the tests, verbose, with coverage (needs .env and a migrated DB)
+vet: ## [host] Run go vet
+	go vet ./...
+
+fmt: ## [host] Format all Go files
+	gofmt -l -w .
+
+clean: ## [host] Remove build output, coverage and UI build
+	rm -rf bin coverage.out coverage.html ui/dist
+
+# ---- host against the postgres container --------------------------------
+
+test-unit: ## [host] Fast tests, no database, no .env (-short)
+	go test -count=1 -short -v ./...
+
+test: ## [both] All tests, including the database (needs make db-up db-migrate)
 	$(LOAD_ENV) && go test -count=1 -v -cover ./...
 
-cover: ## Write an HTML coverage report to coverage.html
+cover: ## [both] HTML coverage report from the full test run
 	$(LOAD_ENV) && go test -count=1 -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
-vet: ## Run go vet
-	go vet ./...
+# ---- docker -------------------------------------------------------------
 
-fmt: ## Format all Go files
-	gofmt -l -w .
+db-up: ## [docker] Start Postgres only (:5432)
+	docker compose up -d --wait postgres
 
-clean: ## Remove build output, coverage and UI build
-	rm -rf bin coverage.out coverage.html ui/dist
+db-migrate: ## [docker] Apply migrations/*.sql to the dev database
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < migrations/0001_create_snippets.sql
+
+stack-up: ## [docker] Build and start postgres, api, web and the LB (:8080)
+	docker compose up -d --wait --build
+
+down: ## [docker] Stop all containers (keeps the volume; -v wipes it)
+	docker compose down

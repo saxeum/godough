@@ -12,6 +12,10 @@ import (
 
 // Needs a migrated database: make db-up db-migrate.
 func TestSnippetsAll(t *testing.T) {
+	if testing.Short() {
+		t.Skip("database test: make db-up db-migrate, then make test")
+	}
+
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
@@ -56,6 +60,10 @@ func TestSnippetsAll(t *testing.T) {
 // readyz is the probe Kubernetes uses, so it must fail when the pool cannot
 // serve, not just when the process is dead.
 func TestReadyz(t *testing.T) {
+	if testing.Short() {
+		t.Skip("database test: make db-up db-migrate, then make test")
+	}
+
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
