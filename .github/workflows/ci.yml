@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The job name is what branch protection requires: "test".
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: godough
+          POSTGRES_PASSWORD: snippet
+          POSTGRES_DB: snippet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U godough -d snippet"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # CI connects as the superuser rather than godough_app: the app role and
+      # its grants come from docker-entrypoint-initdb.d, which has no equivalent
+      # in a service container. `make stack-up` is what exercises those.
+      DATABASE_URL: postgres://godough:snippet@localhost:5432/snippet?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Migrate
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f migrations/0001_create_snippets.sql
+
+      # -count=1: the database is external state the test cache cannot see.
+      - name: Test
+        run: go test -count=1 -v -cover ./...
