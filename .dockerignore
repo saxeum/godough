@@ -1,0 +1,13 @@
+.git
+.gitignore
+bin
+web
+coverage.out
+coverage.html
+.env
+docker-compose.yml
+nginx
+migrations
+docker-entrypoint-initdb.d
+ui
+Makefile

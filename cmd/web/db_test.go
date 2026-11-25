@@ -2,6 +2,8 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -48,5 +50,35 @@ func TestSnippetsAll(t *testing.T) {
 		if !s.Expires.After(s.Created) {
 			t.Errorf("snippets[%d]: Expires %v is not after Created %v", i, s.Expires, s.Created)
 		}
+	}
+}
+
+// readyz is the probe Kubernetes uses, so it must fail when the pool cannot
+// serve, not just when the process is dead.
+func TestReadyz(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
+	}
+
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+
+	app := &application{logger: slog.New(slog.DiscardHandler), db: pool}
+
+	rec := httptest.NewRecorder()
+	app.readyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("readyz with a live pool = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	pool.Close()
+
+	rec = httptest.NewRecorder()
+	app.readyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("readyz with a closed pool = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }

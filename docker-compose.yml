@@ -16,5 +16,30 @@ services:
       timeout: 3s
       retries: 10
 
+  api:
+    build: .
+    environment:
+      SNIPPET_ADDR: ":4000"
+      # In compose the database is the service name, not localhost.
+      DATABASE_URL: postgres://godough_app:snippet_app@postgres:5432/snippet?sslmode=disable
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build: ./ui
+
+  lb:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/lb.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - api
+      - web
+
 volumes:
   postgres-data:

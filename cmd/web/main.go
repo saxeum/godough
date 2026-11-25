@@ -64,7 +64,7 @@ func run(logger *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           app.routes(os.DirFS("ui/dist")),
+		Handler:           app.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

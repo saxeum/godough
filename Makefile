@@ -2,7 +2,7 @@ BINARY := bin/godough
 LOAD_ENV := set -a && . ./.env && set +a
 
 .DEFAULT_GOAL := help
-.PHONY: help build run db-up db-down db-migrate ui-install ui-dev ui-build test cover vet fmt clean
+.PHONY: help build run db-up stack-up down db-migrate ui-install ui-dev ui-build test cover vet fmt clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-11s\033[0m %s\n", $$1, $$2}'
@@ -10,13 +10,16 @@ help: ## Show this help
 build: ## Compile the server to bin/godough
 	go build -o $(BINARY) ./cmd/web
 
-run: ## Run the server, using .env for SNIPPET_ADDR and DATABASE_URL
+run: ## Run the API only, using .env (the UI is make ui-dev)
 	$(LOAD_ENV) && go run ./cmd/web
 
-db-up: ## Start Postgres (docker compose, :5432)
-	docker compose up -d --wait
+db-up: ## Start Postgres only (:5432)
+	docker compose up -d --wait postgres
 
-db-down: ## Stop Postgres (keeps the volume; -v wipes it)
+stack-up: ## Build and start postgres, api, web and the LB (:8080)
+	docker compose up -d --wait --build
+
+down: ## Stop all containers (keeps the volume; -v wipes it)
 	docker compose down
 
 db-migrate: ## Apply migrations/*.sql to the dev database
@@ -25,7 +28,7 @@ db-migrate: ## Apply migrations/*.sql to the dev database
 ui-install: ## Install UI dependencies
 	npm --prefix ui install
 
-ui-dev: ## Run the Vite dev server (:5173, proxies /snippet to :4000)
+ui-dev: ## Run the Vite dev server (:5173, proxies /api to :4000)
 	npm --prefix ui run dev
 
 ui-build: ## Build the React UI into ui/dist

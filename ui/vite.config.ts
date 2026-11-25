@@ -5,10 +5,11 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // The Go server owns the API; `npm run dev` proxies it so the UI can call
-    // /snippet/* in development without CORS.
+    // The Go server owns the API under /api; `npm run dev` proxies it so the
+    // UI is same-origin in development, exactly as the nginx LB makes it in
+    // docker compose and the ingress makes it in production.
     proxy: {
-      '/snippet': 'http://localhost:4000',
+      '/api': 'http://localhost:4000',
     },
   },
 })
