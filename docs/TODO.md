@@ -47,7 +47,9 @@ remaining work is tracked by #117, #115, #116 and the edge decision below.
 Use a **normal managed node group**, not Fargate or Auto Mode, for staging:
 
 - One EKS control plane.
-- One Graviton `t4g.small` node group, min 1, max 2, in the private subnets.
+- One `t3.small` node group, min 1, max 2, in the private subnets. x86_64, not
+  Graviton: the images CI publishes are amd64-only, so an ARM node cannot pull
+  them. `t4g.small` is ~$4/month cheaper and is what #134 would unlock.
 - The existing `godough-eks-nodes` security group, so RDS needs no new ingress.
 - One NAT gateway for ECR pulls and AWS APIs. It costs about the same as the
   interface endpoints it replaces, and is simpler.
@@ -57,7 +59,7 @@ Use a **normal managed node group**, not Fargate or Auto Mode, for staging:
 Fargate is not cheaper at this size, has per-pod minimums, no DaemonSets, and
 needs a second pod-security-group model. Auto Mode is a reasonable later step;
 it is not simpler to debug today. Approximate staging cost excluding data
-transfer: control plane ~$73/mo, node ~$12–15, NAT ~$33, RDS ~$15, bastion ~$3.
+transfer: control plane ~$73/mo, node ~$16–19, NAT ~$37, RDS ~$15, bastion ~$3.
 
 ## P2.1 — migrations — epic #111
 
