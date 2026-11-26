@@ -146,7 +146,11 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 
 // ListSnippets implements GET /api/snippet.
 func (s *Server) ListSnippets(ctx context.Context, _ ListSnippetsRequestObject) (ListSnippetsResponseObject, error) {
-	items, err := s.snippets.List(ctx)
+	ownerID, ok := sessionUserID(ctx)
+	if !ok {
+		return nil, errors.New("snippet route reached without a session")
+	}
+	items, err := s.snippets.List(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +159,11 @@ func (s *Server) ListSnippets(ctx context.Context, _ ListSnippetsRequestObject) 
 
 // GetSnippet implements GET /api/snippet/{id}.
 func (s *Server) GetSnippet(ctx context.Context, request GetSnippetRequestObject) (GetSnippetResponseObject, error) {
-	item, err := s.snippets.Get(ctx, request.Id)
+	ownerID, ok := sessionUserID(ctx)
+	if !ok {
+		return nil, errors.New("snippet route reached without a session")
+	}
+	item, err := s.snippets.Get(ctx, ownerID, request.Id)
 	switch {
 	case errors.Is(err, snippet.ErrNotFound):
 		return GetSnippet404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse(errorBody(http.StatusNotFound))}, nil
@@ -167,7 +175,11 @@ func (s *Server) GetSnippet(ctx context.Context, request GetSnippetRequestObject
 
 // CreateSnippet implements POST /api/snippet.
 func (s *Server) CreateSnippet(ctx context.Context, request CreateSnippetRequestObject) (CreateSnippetResponseObject, error) {
-	created, err := s.snippets.Create(ctx, snippet.New{
+	ownerID, ok := sessionUserID(ctx)
+	if !ok {
+		return nil, errors.New("snippet route reached without a session")
+	}
+	created, err := s.snippets.Create(ctx, ownerID, snippet.New{
 		Title:         request.Body.Title,
 		Content:       request.Body.Content,
 		ExpiresInDays: request.Body.ExpiresInDays,
@@ -193,7 +205,11 @@ func (s *Server) CreateSnippet(ctx context.Context, request CreateSnippetRequest
 
 // DeleteSnippet implements DELETE /api/snippet/{id}.
 func (s *Server) DeleteSnippet(ctx context.Context, request DeleteSnippetRequestObject) (DeleteSnippetResponseObject, error) {
-	err := s.snippets.Delete(ctx, request.Id)
+	ownerID, ok := sessionUserID(ctx)
+	if !ok {
+		return nil, errors.New("snippet route reached without a session")
+	}
+	err := s.snippets.Delete(ctx, ownerID, request.Id)
 	switch {
 	case errors.Is(err, snippet.ErrNotFound):
 		return DeleteSnippet404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse(errorBody(http.StatusNotFound))}, nil
