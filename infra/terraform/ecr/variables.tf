@@ -21,3 +21,15 @@ variable "github_branch" {
   type        = string
   default     = "master"
 }
+
+variable "github_owner_id" {
+  description = "Immutable GitHub owner id used in the OIDC subject."
+  type        = string
+  default     = "343752441"
+}
+
+variable "github_repository_id" {
+  description = "Immutable GitHub repository id used in the OIDC subject."
+  type        = string
+  default     = "1472378230"
+}

@@ -4,6 +4,9 @@ locals {
   api_repository = "${var.project}-api"
   web_repository = "${var.project}-web"
   state_bucket   = "${var.project}-terraform-state-${data.aws_caller_identity.current.account_id}"
+  github_owner   = split("/", var.github_repository)[0]
+  github_repo    = split("/", var.github_repository)[1]
+  github_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:ref:refs/heads/${var.github_branch}"
 }
 
 resource "aws_ecr_repository" "api" {
@@ -81,8 +84,12 @@ resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
   thumbprint_list = [
+    # Old GitHub/DigiCert chain, retained for overlap.
     "6938fd4d98bab03faadb97b34396831e3780aea1",
     "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
+    # Current GitHub chain: Let's Encrypt YR1 / Root YR.
+    "cbcfd09ce3cd22d99d94e58f92e9898fbee51a5e",
+    "ab9d0263244dd0326eb67015705a667e79cfe998",
   ]
 }
 
@@ -104,7 +111,7 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"]
+      values   = [local.github_subject]
     }
   }
 }
