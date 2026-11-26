@@ -302,10 +302,14 @@ resource "aws_eks_node_group" "staging" {
   node_role_arn   = aws_iam_role.nodes.arn
   subnet_ids      = local.private_subnet_ids
 
-  # No image_id: the group takes the EKS-optimised AL2023 ARM64 image that
-  # matches its cluster version, so an AMI upgrade is a node group update rather
-  # than a pinned id that goes stale.
-  ami_type       = "AL2023_ARM_64_STANDARD"
+  # No image_id: the group takes the EKS-optimised AL2023 image that matches its
+  # cluster version, so an AMI upgrade is a node group update rather than a
+  # pinned id that goes stale.
+  #
+  # x86_64 and not ARM: the images CI publishes are amd64-only, and a Graviton
+  # node cannot pull them (`no match for platform in manifest`). This must agree
+  # with node_instance_types — t3 is amd64, t4g is ARM.
+  ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = var.node_instance_types
   capacity_type  = "ON_DEMAND"
 

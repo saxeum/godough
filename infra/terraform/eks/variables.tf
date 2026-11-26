@@ -17,9 +17,9 @@ variable "cluster_version" {
 }
 
 variable "node_instance_types" {
-  description = "Node instance types. One Graviton size: two vCPU and two GiB is enough for the API, the UI and a migration Job."
+  description = "Node instance types. x86_64, because the published images are amd64-only: t4g.small is cheaper and would need a multi-arch build first (#134)."
   type        = list(string)
-  default     = ["t4g.small"]
+  default     = ["t3.small"]
 }
 
 variable "node_desired_size" {

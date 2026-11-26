@@ -17,8 +17,10 @@ security group ids from its state.
 
 - **Control plane**, Kubernetes `1.37`, private endpoint only, admin access for
   the identity that applies it.
-- **One managed node group**: Graviton `t4g.small`, min 1, max 2, in the private
-  subnets. The data stack's `godough-eks-nodes` security group is attached through
+- **One managed node group**: `t3.small`, min 1, max 2, in the private subnets.
+  x86_64, not Graviton: the images CI publishes are amd64-only, so an ARM node
+  cannot pull them (`no match for platform in manifest`). `t4g.small` is about
+  20% cheaper and is the first thing to revisit if #134 ever builds multi-arch. The data stack's `godough-eks-nodes` security group is attached through
   a launch template, which is the only way to attach an extra group to a managed
   node group — RDS already trusts that group on 5432.
 - **Add-ons**: VPC CNI, kube-proxy, CoreDNS, and the EBS CSI driver. Version
@@ -191,11 +193,21 @@ kubectl delete pod ecr-pull
 ### Resolve DNS and reach the internet
 
 ```
-kubectl run dns-check --rm -i --restart=Never --image=busybox:1.37 -- nslookup kubernetes.default
+kubectl run dns-check --rm -i --restart=Never --image=busybox:1.37 -- nslookup kubernetes.default.svc.cluster.local
 ```
 
-Answers with the `kubernetes.default` service address in the service CIDR. A
-timeout here is CoreDNS; a pull failure is the NAT gateway.
+Prints `172.20.0.1`, the API service. It has to be the FQDN: busybox's `nslookup`
+does not apply the search domains, so `kubernetes.default` returns `NXDOMAIN`
+from a perfectly healthy CoreDNS — which is a false failure this check used to
+have.
+
+```
+kubectl run dns-ext --rm -i --restart=Never --image=busybox:1.37 -- nslookup example.com
+```
+
+Resolves, which is CoreDNS forwarding to the VPC resolver and the NAT gateway
+allowing it out. A timeout here is the NAT; `NXDOMAIN` on the name above is
+CoreDNS.
 
 ### Provision a volume
 
@@ -258,9 +270,10 @@ the owner and application secrets from #114. Nothing here writes to the database
 ## Cost
 
 Approximate, `ap-southeast-2`, excluding data transfer: control plane ~$73/month,
-one `t4g.small` node ~$12–15, the NAT gateway and its address ~$37, the KMS key
-~$1. With the data stack's RDS and bastion, staging costs roughly $140/month to
-sit idle.
+one `t3.small` node ~$16–19, the NAT gateway and its address ~$37, the KMS key
+~$1. With the data stack's RDS and bastion, staging costs roughly $145/month to
+sit idle. The x86_64 node is about $4/month more than the Graviton size it
+replaced.
 
 ## Why not Fargate, why not Auto Mode
 

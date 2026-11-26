@@ -273,8 +273,11 @@ ecr-login: ## [host] Log Docker in to the ECR registry
 ecr-build: ## [host] Build api and web images tagged for ECR
 	@test -n "$(ECR_REGISTRY)" || { echo "ECR_REGISTRY is not set: <account>.dkr.ecr.<region>.amazonaws.com"; exit 1; }
 	@mkdir -p "$(ECR_DOCKER_CONFIG)"
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build -t "$(ECR_REGISTRY)/godough-api:$(PUSH_TAG)" .
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build -t "$(ECR_REGISTRY)/godough-web:$(PUSH_TAG)" ./ui
+# --platform is stated rather than inherited: the cluster's nodes are x86_64, and
+# an image built on an ARM machine or with a buildx default would publish
+# something the kubelet cannot run (see #134).
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build --platform linux/amd64 -t "$(ECR_REGISTRY)/godough-api:$(PUSH_TAG)" .
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build --platform linux/amd64 -t "$(ECR_REGISTRY)/godough-web:$(PUSH_TAG)" ./ui
 
 ecr-push: ecr-login ecr-build ## [host] Build and push api and web images by commit SHA
 	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-api:$(PUSH_TAG)"
