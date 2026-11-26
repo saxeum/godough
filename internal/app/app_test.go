@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,5 +204,71 @@ func TestAppWiring(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("GET /readyz with a closed pool = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+// TestShutdownGraceExpiryIsNotAFailure is the policy #72 asks for: a drain that
+// runs out of time closes the connections, says so at Warn, and still exits
+// cleanly. It is not a crash, and a Kubernetes rollout must not read it as one.
+//
+// The handler blocks on its own request context, so the only thing that can end
+// it is srv.Close(). That is what makes the assertion about the request, not
+// just about the return value.
+func TestShutdownGraceExpiryIsNotAFailure(t *testing.T) {
+	var logs bytes.Buffer
+	entered := make(chan struct{})
+	cancelled := make(chan struct{})
+
+	a := &App{
+		log: slog.New(slog.NewTextHandler(&logs, nil)),
+		srv: &http.Server{Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			close(entered)
+			<-r.Context().Done()
+			close(cancelled)
+		})},
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	served := make(chan error, 1)
+	go func() { served <- a.serve(ctx, listener, 50*time.Millisecond) }()
+
+	//nolint:errcheck // the request is expected to be cut off; its error is noise here.
+	go func() {
+		resp, err := http.Get("http://" + listener.Addr().String() + "/")
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	<-entered
+	stop()
+
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Errorf("serve returned %v, want nil: a spent grace period is not a failure", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after the grace period expired")
+	}
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the in-flight request was not cancelled: the connections were never closed")
+	}
+
+	if got := logs.String(); !strings.Contains(got, "grace expired") {
+		t.Errorf("the spent grace period was not logged:\n%s", got)
+	}
+	if got := logs.String(); strings.Contains(got, "level=ERROR") {
+		t.Errorf("a spent grace period was logged at ERROR:\n%s", got)
 	}
 }
