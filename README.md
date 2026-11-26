@@ -283,6 +283,15 @@ No agent merges, and nobody pushes to `master` directly.
 Pending work lives in the issue tracker, not here — a list of what is missing
 becomes wrong the moment it is fixed.
 
+## Publishing images
+
+```
+make ecr-login ECR_REGISTRY=<registry>
+make ecr-push ECR_REGISTRY=<registry> TAG=<commit-sha>
+```
+
+The CI `publish` job runs `make ecr-push` on `master` after `test` and `e2e`, authenticating through GitHub OIDC. The ECR stack is in `infra/terraform/ecr`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

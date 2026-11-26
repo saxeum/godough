@@ -30,4 +30,8 @@ go.work.sum
 tfplan
 *.tfvars
 !*.tfvars.example
+backend.hcl
 crash.log
+
+# Local Docker login config used by make ecr-push
+.docker-ecr/
