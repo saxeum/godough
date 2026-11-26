@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -294,5 +296,65 @@ func TestTheTimeoutLadderIsOrdered(t *testing.T) {
 
 	if readHeaderTimeout > readTimeout {
 		t.Errorf("readHeaderTimeout (%v) exceeds readTimeout (%v)", readHeaderTimeout, readTimeout)
+	}
+}
+
+// TestNewRespectsItsContextDeadline is the regression test #62 promised and did
+// not get. The behaviour was verified once by hand; without this, deleting the
+// deadline leaves the suite green.
+//
+// The listener accepts and never speaks, so the only thing that can end the
+// connect attempt is the context. Accepted connections are held open and closed
+// in cleanup: closing one early sends a FIN, pgx fails on EOF immediately, and
+// the test would pass for the wrong reason.
+func TestNewRespectsItsContextDeadline(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	// connect_timeout would otherwise impose the driver's own limit first, and
+	// the test would be measuring pgx rather than the deadline.
+	dsn := "postgres://x@" + listener.Addr().String() + "/db?sslmode=disable&connect_timeout=60"
+
+	start := time.Now()
+	_, err = New(ctx, config.Config{Addr: "127.0.0.1:0", DatabaseURL: dsn}, slog.New(slog.DiscardHandler))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("New succeeded against a database that never answered")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("New took %v; the caller's 100ms deadline should have ended it", elapsed)
 	}
 }
