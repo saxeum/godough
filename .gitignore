@@ -21,3 +21,13 @@ go.work.sum
 .env
 
 .zed/
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
