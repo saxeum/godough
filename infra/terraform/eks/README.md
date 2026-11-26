@@ -68,38 +68,178 @@ the private endpoint from inside the cluster and replaces the local apply. Until
 Argo CD lands, `kubectl apply` from a laptop is the deploy path, and the ordering
 in #115 (Job, wait for completion, then the Deployment) is a local sequence.
 
+Start the forward in its own terminal and leave it running:
+
 ```
-terraform -chdir=infra/terraform/data output -raw bastion_instance_id
+make eks-tunnel
+```
+
+In a second terminal, write a kubeconfig that dials the local end of that forward
+but keeps the real hostname as the TLS server name, so the certificate still
+validates:
+
+```
+make eks-kubeconfig
 ```
 
 ```
-terraform -chdir=infra/terraform/eks output -raw cluster_endpoint
+export KUBECONFIG=$PWD/.kubeconfig-eks
 ```
 
-Start the forward in its own terminal, with the bastion id and the endpoint host
-from those two commands substituted:
+The write is to `./.kubeconfig-eks`, not `~/.kube/config`, so a second cluster
+does not overwrite the first and nothing here touches a working laptop setup.
+
+## Smoke test
+
+Run this after the first apply and before any chart exists. It answers four
+questions: can I reach the API, is the node usable, can a pod pull the project's
+own image from ECR, and does a volume actually provision — which is the only
+end-to-end proof that the IRSA role works.
+
+None of these commands have been run against a live cluster: the stack was
+planned and validated, not applied. The first apply is what makes them checkable,
+and the expected output below is what should appear, not what has been seen.
+
+### Reach the API
+
+With `make eks-tunnel` running in its own terminal, and `KUBECONFIG` exported:
 
 ```
-aws ssm start-session --target <bastion-instance-id> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["<endpoint-host>"],"portNumber":["443"],"localPortNumber":["6443"]}'
+kubectl version -o yaml
 ```
 
-Then point the cluster at the local port, keeping the TLS server name so the
-certificate still validates:
+The server block has a `gitVersion` and a `kustomizeVersion`. No server block
+means the tunnel or the TLS server name is wrong.
 
 ```
-aws eks update-kubeconfig --name godough-staging --region ap-southeast-2
+kubectl auth can-i '*' '*'
 ```
 
-```
-kubectl config set-cluster "$(kubectl config view -o jsonpath='{.clusters[0].name}')" --server=https://127.0.0.1:6443 --tls-server-name=<endpoint-host>
-```
+Prints `yes`: the identity that applied the cluster is an access entry admin.
 
 ```
 kubectl get nodes -o wide
 ```
 
-These three commands have not been run against a live cluster yet: the stack was
-planned and validated, not applied. The first apply is what makes them checkable.
+One node, `Ready`, `v1.37.x`, `INTERNAL-IP` in `10.42.0.0/16`, `EXTERNAL-IP`
+`<none>`. A public IP here means the node group landed in the wrong subnets.
+
+```
+kubectl get pods -A
+```
+
+`aws-node`, `kube-proxy` and `ebs-csi-node` Running on the one node, `coredns`
+with two ready replicas, `ebs-csi-controller` with its containers Running.
+
+```
+aws eks describe-cluster --region ap-southeast-2 --name godough-staging --query 'cluster.resourcesVpcConfig.endpointPublicAccess'
+```
+
+Prints `false`. If this ever says `true`, someone re-enabled the public endpoint
+and the tunnel is not what is protecting the API.
+
+Negative control — stop the tunnel with `^C`, then:
+
+```
+kubectl get nodes --request-timeout=5s
+```
+
+Fails with `connect: connection refused` on `127.0.0.1:6443`. That is the check
+that the kubeconfig is talking to the forward and not to something else.
+
+### Pull an image from ECR
+
+```
+export REGISTRY=$(terraform -chdir=infra/terraform/ecr output -raw registry)
+```
+
+```
+export TAG=$(git rev-parse origin/master)
+```
+
+```
+kubectl run ecr-pull --image=$REGISTRY/godough-api:$TAG --restart=Never -- /godough
+```
+
+```
+kubectl describe pod ecr-pull | grep -E 'Pulled|Started|Failed'
+```
+
+`Pulled` and `Started` are the pass. The container then exits non-zero because
+`SNIPPET_ADDR` and `DATABASE_URL` are unset — that is the api refusing to start,
+not a pull failure. `ErrImagePull` or `401` means the node role cannot read the
+repository.
+
+```
+kubectl delete pod ecr-pull
+```
+
+### Resolve DNS and reach the internet
+
+```
+kubectl run dns-check --rm -i --restart=Never --image=busybox:1.37 -- nslookup kubernetes.default
+```
+
+Answers with the `kubernetes.default` service address in the service CIDR. A
+timeout here is CoreDNS; a pull failure is the NAT gateway.
+
+### Provision a volume
+
+The EBS CSI controller is the only workload using IRSA, so a bound volume is the
+only proof that the OIDC provider, the trust policy and the role are all right.
+
+```
+cat > /tmp/smoke-ebs.yaml <<'YAML'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: smoke-gp3
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+reclaimPolicy: Delete
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: smoke-claim
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: smoke-gp3
+  resources:
+    requests:
+      storage: 1Gi
+YAML
+```
+
+```
+kubectl apply -f /tmp/smoke-ebs.yaml
+```
+
+```
+kubectl get pvc smoke-claim -o wide
+```
+
+`Bound`, and the `VOLUME` column holds a `pvc-…` id.
+
+```
+kubectl describe pvc smoke-claim | grep -i 'provisioner\|ebs.csi.aws.com'
+```
+
+Names `ebs.csi.aws.com`. A PVC stuck in `Pending` with `failed to provision
+volume` in `kubectl describe pvc` is the IRSA trust, not storage.
+
+```
+kubectl delete -f /tmp/smoke-ebs.yaml
+```
+
+Deletes the claim, the volume and the class together; `reclaimPolicy: Delete` is
+what stops 1 GiB of gp3 sitting in the account afterwards.
+
+### What this does not cover
+
+Reaching RDS from a pod with `verify-full` and the CA bundle is #116, and needs
+the owner and application secrets from #114. Nothing here writes to the database.
 
 ## Cost
 
