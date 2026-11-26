@@ -20,25 +20,35 @@ type Server struct {
 	log            *slog.Logger
 	snippets       *service.Snippets
 	sessions       SessionService
+	users          UserService
+	google         GoogleAuth
 	trustedOrigins []string
 	// ready is the readiness check. It is a function rather than a pool so this
 	// package does not import a driver.
 	ready func(ctx context.Context) error
 }
 
-func NewServer(
-	log *slog.Logger,
-	snippets *service.Snippets,
-	sessions SessionService,
-	trustedOrigins []string,
-	ready func(ctx context.Context) error,
-) *Server {
+// Deps is the composition root's view of the transport. A nil Google means
+// sign-in is not configured; the rest are required.
+type Deps struct {
+	Log            *slog.Logger
+	Snippets       *service.Snippets
+	Sessions       SessionService
+	Users          UserService
+	Google         GoogleAuth
+	TrustedOrigins []string
+	Ready          func(ctx context.Context) error
+}
+
+func NewServer(deps Deps) *Server {
 	return &Server{
-		log:            log,
-		snippets:       snippets,
-		sessions:       sessions,
-		trustedOrigins: trustedOrigins,
-		ready:          ready,
+		log:            deps.Log,
+		snippets:       deps.Snippets,
+		sessions:       deps.Sessions,
+		users:          deps.Users,
+		google:         deps.Google,
+		trustedOrigins: deps.TrustedOrigins,
+		ready:          deps.Ready,
 	}
 }
 
@@ -49,6 +59,8 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
+	mux.HandleFunc("GET /api/auth/google", s.googleStart)
+	mux.HandleFunc("GET /api/auth/google/callback", s.googleCallback)
 
 	// Two callbacks, because the generated router fails in two places: a body
 	// that will not decode (strict options) and a path or query parameter that

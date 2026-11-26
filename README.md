@@ -62,6 +62,9 @@ different inside the network than outside it.
 - `TRUSTED_ORIGINS` — comma-separated exact origins allowed to make
   cookie-authenticated writes. Empty fails closed; a malformed value refuses to
   boot
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URL` — set all
+  three or none. Without them `/api/auth/google` is `503`; the secret is a
+  deployment secret, never an image layer
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
   that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
@@ -164,6 +167,18 @@ Postgres for seven days absolute, with no sliding renewal; the cookie is
 `HttpOnly; Secure; SameSite=Lax`, and the database stores only its SHA-256 hash.
 Expired rows are ignored by the lookup and removed at boot. The page shows a
 signed-out state until the sign-in UI lands (#56).
+
+Sign-in is the server-side Google authorization-code flow: `/api/auth/google`
+redirects, `/api/auth/google/callback` exchanges the code and verifies the ID
+token. PKCE, state and nonce travel in short-lived HttpOnly cookies and are
+single-use. There is no Google JavaScript on the page. `/api/auth/*` is browser
+navigation, not part of the generated client contract, so it is deliberately
+outside `openapi.yaml`.
+
+Any verified Google account may sign in; there is no allowlist. That is a
+deliberate platform default, not an inherited demo accident. A deployment that
+needs a restriction enforces it on the verified identity before creating the
+user row.
 
 ## Tests
 

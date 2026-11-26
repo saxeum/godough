@@ -17,6 +17,7 @@ const sessionCookieName = "session"
 // or a 401.
 type SessionService interface {
 	Authenticate(ctx context.Context, token string) (auth.Session, error)
+	Create(ctx context.Context, userID int64, ip, userAgent string) (string, auth.Session, error)
 }
 
 type sessionKey struct{}
