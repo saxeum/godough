@@ -86,6 +86,27 @@ test variables are required by `make db-test` and `make test`. A missing runtime
 value exits at startup with its name; a bad `LOG_LEVEL` or `LOG_FORMAT` exits
 with the offending value in the error.
 
+## Migrations
+
+`migrations/*.sql` are embedded in the migrator, so `go run ./cmd/migrate`
+applies exactly the files in the binary that was built. A migration that has run
+is immutable: each row in `schema_migrations` carries the SHA-256 of the file
+that ran, and a runner refuses to continue if a recorded file no longer matches
+its checksum, because the database and the file would then disagree about what
+ran. Add a new file instead of editing one; `0003`/`0004` are the pattern for a
+change that needs two deploys.
+
+Only one runner applies at a time: it holds a session advisory lock and a second
+runner exits with "another migration is running" rather than waiting. A run that
+is killed leaves the lock with the session, so there is nothing to clean up by
+hand. Each file runs in one transaction with a 30-second `lock_timeout`, so a
+migration queued behind a long-lived reader fails with a named error instead of
+waiting forever.
+
+`go run ./cmd/migrate -status` prints `applied`, `pending` and `changed` and
+writes nothing, not even the table, so it is safe against a database whose role
+only reads.
+
 `.env.example` shows the production TLS form: `verify-full` plus a CA bundle.
 The local compose Postgres has no certificate, so a host process pointed at that
 container needs `sslmode=disable` in its own `.env`; the api container is
@@ -133,7 +154,7 @@ failure still arrives as an `ApiError` with its per-field messages.
 ```
 cmd/web/                       main: config, then run
 cmd/migrate/                   applies the embedded migrations; ships in the same image
-internal/migrate/              discovery, ordering and the per-file transaction
+internal/migrate/              discovery, checksums, the advisory lock, the per-file transaction
 internal/config/               environment -> Config, validated at startup
 internal/domain/snippet/       entity, create-input, ErrNotFound, ValidationError
 internal/service/              the rules; declares the repository interface it uses
