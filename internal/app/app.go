@@ -118,6 +118,12 @@ func (a *App) Run(ctx context.Context) error {
 // Split from Run so a test can bind port 0, learn the address, and cancel the
 // context — with the listen call buried inside Run there was nothing to drive.
 func (a *App) Serve(ctx context.Context, listener net.Listener) error {
+	return a.serve(ctx, listener, shutdownGrace)
+}
+
+// serve is Serve with the grace period as an argument, so the expiry path can be
+// exercised without waiting ten seconds for it.
+func (a *App) serve(ctx context.Context, listener net.Listener, grace time.Duration) error {
 	serveErr := make(chan error, 1)
 	go func() {
 		err := a.srv.Serve(listener)
@@ -134,18 +140,35 @@ func (a *App) Serve(ctx context.Context, listener net.Listener) error {
 	case <-ctx.Done():
 	}
 
-	shutdownCtx, release := context.WithTimeout(context.Background(), shutdownGrace)
+	a.drain(grace)
+	return nil
+}
+
+// drain stops accepting connections and waits up to grace for the ones already
+// running.
+//
+// Running out of grace is not a failure of the process and must not be reported
+// as one. A request that took eleven seconds is a slow request, not a crash, and
+// returning an error here makes `kubectl rollout status` report a failed rollout
+// for a pod that did what it was told. The number that should have been generous
+// enough is terminationGracePeriodSeconds in the manifest (#5); the process's job
+// is to leave a trace saying it was not.
+func (a *App) drain(grace time.Duration) {
+	ctx, release := context.WithTimeout(context.Background(), grace)
 	defer release()
 
-	if err := a.srv.Shutdown(shutdownCtx); err != nil {
-		// Shutdown returning an error means requests are still running. Close the
-		// connections so they stop, rather than letting the deferred pool Close
-		// pull the database out from under handlers that are mid-query.
-		a.srv.Close()
-		return fmt.Errorf("shutdown: %w", err)
+	err := a.srv.Shutdown(ctx)
+	if err == nil {
+		a.log.Info("graceful shutdown complete")
+		return
 	}
-	a.log.Info("graceful shutdown complete")
-	return nil
+
+	// Requests are still running. Close the connections so they stop, rather than
+	// letting the caller's pool Close pull the database out from under handlers
+	// that are mid-query. Shutdown drains; Close stops.
+	a.srv.Close()
+	a.log.Warn("shutdown grace expired with requests in flight; connections closed",
+		"err", err, "grace", grace)
 }
 
 // Close releases the database pool. It is separate from Run so the caller
