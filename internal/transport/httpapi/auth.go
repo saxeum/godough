@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"net"
 	"net/http"
 	"time"
@@ -29,6 +30,7 @@ type GoogleAuth interface {
 // UserService is the one operation the callback needs.
 type UserService interface {
 	Ensure(ctx context.Context, sub, email, name string) (auth.User, error)
+	Get(ctx context.Context, id int64) (auth.User, error)
 }
 
 // googleStart begins the authorization-code flow. The state, nonce and PKCE
@@ -123,6 +125,50 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 
 	setSessionCookie(w, token, session.Expires)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// authSession is what the UI asks for on load. It is the only endpoint that
+// tells the browser who the cookie belongs to; no token or email is baked into
+// the bundle.
+func (s *Server) authSession(w http.ResponseWriter, r *http.Request) {
+	session, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody(http.StatusUnauthorized))
+		return
+	}
+	user, err := s.users.Get(r.Context(), session.UserID)
+	switch {
+	case errors.Is(err, auth.ErrNotFound):
+		writeJSON(w, http.StatusUnauthorized, errorBody(http.StatusUnauthorized))
+		return
+	case err != nil:
+		s.log.Error("session user lookup failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}{Email: user.Email, Name: user.Name})
+}
+
+// authSignout deletes the database row, then clears the cookie. A failed delete
+// is a 500 rather than a cheerful redirect: revocation is the point, and a
+// cookie that looks cleared while the row lives on is the bug the ticket
+// exists to prevent.
+func (s *Server) authSignout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || cookie.Value == "" {
+		writeJSON(w, http.StatusUnauthorized, errorBody(http.StatusUnauthorized))
+		return
+	}
+	if err := s.sessions.Revoke(r.Context(), cookie.Value); err != nil {
+		s.log.Error("sign-out failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+	clearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) signInFailed(w http.ResponseWriter, r *http.Request, reason string) {

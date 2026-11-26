@@ -45,10 +45,16 @@ func (fakeSessions) Create(_ context.Context, userID int64, _, _ string) (string
 	return "test-session", auth.Session{ID: 1, UserID: userID, Expires: time.Now().Add(time.Hour)}, nil
 }
 
+func (fakeSessions) Revoke(context.Context, string) error { return nil }
+
 type fakeUsers struct{}
 
 func (fakeUsers) Ensure(_ context.Context, sub, email, name string) (auth.User, error) {
 	return auth.User{ID: 1, Sub: sub, Email: email, Name: name}, nil
+}
+
+func (fakeUsers) Get(context.Context, int64) (auth.User, error) {
+	return auth.User{ID: 1, Email: "test@example.com", Name: "Test"}, nil
 }
 
 func newDeps(log *slog.Logger, repo service.SnippetRepository) httpapi.Deps {

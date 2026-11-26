@@ -65,7 +65,9 @@ different inside the network than outside it.
   boot
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URL` — set all
   three or none. Without them `/api/auth/google` is `503`; the secret is a
-  deployment secret, never an image layer
+  deployment secret, never an image layer. The redirect URI must be registered
+  on the OAuth client; the local one is
+  `http://localhost:8080/api/auth/google/callback`
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
   that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
@@ -174,9 +176,12 @@ signed-out state until the sign-in UI lands (#56).
 Sign-in is the server-side Google authorization-code flow: `/api/auth/google`
 redirects, `/api/auth/google/callback` exchanges the code and verifies the ID
 token. PKCE, state and nonce travel in short-lived HttpOnly cookies and are
-single-use. There is no Google JavaScript on the page. `/api/auth/*` is browser
-navigation, not part of the generated client contract, so it is deliberately
-outside `openapi.yaml`.
+single-use. There is no Google JavaScript on the page. `/api/auth/google` and
+the callback are browser navigation and deliberately outside `openapi.yaml`;
+`GET /api/auth/session` and `POST /api/auth/signout` are the UI's own control
+endpoints, also hand-written. The page uses `/api/auth/session` to decide
+between the signed-out prompt and the signed-in header, and sign-out deletes
+the database row before clearing the cookie.
 
 Any verified Google account may sign in; there is no allowlist. That is a
 deliberate platform default, not an inherited demo accident. A deployment that

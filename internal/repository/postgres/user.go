@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,6 +35,21 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 
 // UpsertUser maps a verified provider identity onto one row. sub is the key;
 // email and name are display values and may change on a later sign-in.
+func (r *UserRepository) GetUser(ctx context.Context, id int64) (auth.User, error) {
+	rows, err := r.db.Query(ctx, `SELECT id, sub, email, name, created FROM users WHERE id = $1`, id)
+	if err != nil {
+		return auth.User{}, fmt.Errorf("query user %d: %w", id, err)
+	}
+	scanned, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByPos[userRow])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.User{}, auth.ErrNotFound
+	}
+	if err != nil {
+		return auth.User{}, fmt.Errorf("collect user %d: %w", id, err)
+	}
+	return scanned.toDomain(), nil
+}
+
 func (r *UserRepository) UpsertUser(ctx context.Context, sub, email, name string) (auth.User, error) {
 	rows, err := r.db.Query(ctx, `
 		INSERT INTO users (sub, email, name)

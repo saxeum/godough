@@ -61,6 +61,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /api/auth/google", s.googleStart)
 	mux.HandleFunc("GET /api/auth/google/callback", s.googleCallback)
+	mux.Handle("GET /api/auth/session", requireSession(s.sessions, s.log, http.HandlerFunc(s.authSession)))
+	mux.Handle("POST /api/auth/signout", requireSession(s.sessions, s.log,
+		requireTrustedOrigin(s.trustedOrigins, s.log, http.HandlerFunc(s.authSignout))))
 
 	// Two callbacks, because the generated router fails in two places: a body
 	// that will not decode (strict options) and a path or query parameter that

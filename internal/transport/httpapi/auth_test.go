@@ -34,13 +34,18 @@ func (f *fakeGoogle) Exchange(_ context.Context, code, verifier, nonce string) (
 }
 
 type fakeAuthSessions struct {
-	token   string
-	session auth.Session
-	err     error
-	created bool
+	token        string
+	session      auth.Session
+	err          error
+	created      bool
+	authenticate bool
+	revoked      string
 }
 
 func (f *fakeAuthSessions) Authenticate(context.Context, string) (auth.Session, error) {
+	if f.authenticate {
+		return f.session, nil
+	}
 	return auth.Session{}, auth.ErrNotFound
 }
 
@@ -48,6 +53,11 @@ func (f *fakeAuthSessions) Create(_ context.Context, userID int64, _, _ string) 
 	f.created = true
 	f.session.UserID = userID
 	return f.token, f.session, f.err
+}
+
+func (f *fakeAuthSessions) Revoke(_ context.Context, token string) error {
+	f.revoked = token
+	return f.err
 }
 
 type fakeAuthUsers struct {
@@ -59,14 +69,19 @@ func (f fakeAuthUsers) Ensure(context.Context, string, string, string) (auth.Use
 	return f.user, f.err
 }
 
+func (f fakeAuthUsers) Get(context.Context, int64) (auth.User, error) {
+	return f.user, f.err
+}
+
 func newAuthServer(t *testing.T, google GoogleAuth) http.Handler {
 	t.Helper()
 	return NewServer(Deps{
-		Log:      slog.New(slog.DiscardHandler),
-		Snippets: service.NewSnippets(nil),
-		Sessions: &fakeAuthSessions{token: "session-token", session: auth.Session{Expires: time.Now().Add(time.Hour)}},
-		Users:    fakeAuthUsers{user: auth.User{ID: 42}},
-		Google:   google,
+		Log:            slog.New(slog.DiscardHandler),
+		Snippets:       service.NewSnippets(nil),
+		Sessions:       &fakeAuthSessions{token: "session-token", session: auth.Session{UserID: 42, Expires: time.Now().Add(time.Hour)}, authenticate: true},
+		Users:          fakeAuthUsers{user: auth.User{ID: 42, Email: "person@example.com", Name: "A Person"}},
+		Google:         google,
+		TrustedOrigins: []string{"http://localhost:8080"},
 	}).Routes()
 }
 
@@ -211,5 +226,90 @@ func TestGoogleFlowDisabledIs503(t *testing.T) {
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("%s = %d, want %d", path, rec.Code, http.StatusServiceUnavailable)
 		}
+	}
+}
+
+func TestAuthSessionReturnsTheCurrentUser(t *testing.T) {
+	handler := newAuthServer(t, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if rec.Body.String() != "{\"email\":\"person@example.com\",\"name\":\"A Person\"}\n" {
+		t.Errorf("body = %q", rec.Body.String())
+	}
+}
+
+func TestAuthSessionWithoutACookieIs401(t *testing.T) {
+	handler := newAuthServer(t, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auth/session", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthSignoutRevokesAndClearsTheCookie(t *testing.T) {
+	sessions := &fakeAuthSessions{
+		token:        "session-token",
+		session:      auth.Session{UserID: 42, Expires: time.Now().Add(time.Hour)},
+		authenticate: true,
+	}
+	handler := NewServer(Deps{
+		Log:            slog.New(slog.DiscardHandler),
+		Snippets:       service.NewSnippets(nil),
+		Sessions:       sessions,
+		Users:          fakeAuthUsers{user: auth.User{ID: 42}},
+		TrustedOrigins: []string{"http://localhost:8080"},
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/signout", nil)
+	req.Header.Set("Origin", "http://localhost:8080")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if sessions.revoked != "session-token" {
+		t.Errorf("revoked = %q, want session-token", sessions.revoked)
+	}
+	var cleared bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName && c.MaxAge == -1 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("session cookie was not cleared")
+	}
+}
+
+func TestAuthSignoutRequiresATrustedOrigin(t *testing.T) {
+	handler := newAuthServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/signout", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestAuthSignoutWithoutASessionIs401(t *testing.T) {
+	handler := newAuthServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/signout", nil)
+	req.Header.Set("Origin", "http://localhost:8080")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }

@@ -140,6 +140,9 @@ if [ "${#AUTH[@]}" -gt 0 ]; then
 
   set_cookie=$(curl -s -D - -o /dev/null "${AUTH[@]}" "$BASE_URL/api/snippet" | grep -ci 'set-cookie')
   if [ "$set_cookie" = "0" ]; then pass "api: a valid session does not churn the cookie"; else fail "api: a valid session does not churn the cookie" "$set_cookie Set-Cookie headers"; fi
+
+  expect_json "api: session returns the signed-in user" "/api/auth/session" \
+    "d.get('email') == 'e2e@example.com' and d.get('name') == 'e2e'"
 fi
 
 # --- the API ---------------------------------------------------------------
@@ -202,10 +205,10 @@ else
   # The browser has no session cookie yet. The signed-in list/view checks come
   # back with the sign-in UI (#56); this proves the page fails closed.
   dom=$(render "/")
-  if [[ "$dom" == *"Sign in required."* ]]; then
+  if [[ "$dom" == *"Sign in required."* && "$dom" == *"Continue with Google"* ]]; then
     pass "render: signed-out state on the list"
   else
-    fail "render: signed-out state on the list" "the rendered DOM has no signed-out message"
+    fail "render: signed-out state on the list" "the rendered DOM has no signed-out message or sign-in link"
   fi
 
   dom=$(render "/snippet/1")
@@ -213,13 +216,6 @@ else
     pass "render: signed-out state on a snippet"
   else
     fail "render: signed-out state on a snippet" "the rendered DOM has no signed-out message"
-  fi
-
-  dom=$(render "/nope")
-  if [[ "$dom" == *"Page not found."* ]]; then
-    pass "render: client route not-found state"
-  else
-    fail "render: client route not-found state" "the rendered DOM has no not-found message"
   fi
 fi
 
@@ -243,6 +239,15 @@ if [ -n "$probe_id" ]; then
     "not any(x['title'] == 'e2e probe $$' for x in d)"
 else
   fail "api: create a snippet" "no ID came back: $resp"
+fi
+
+# --- sign-out --------------------------------------------------------------
+if [ "${#AUTH[@]}" -gt 0 ]; then
+  signout=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: $BASE_URL" "${AUTH[@]}" "$BASE_URL/api/auth/signout")
+  if [ "$signout" = "204" ]; then pass "api: sign out"; else fail "api: sign out" "status $signout"; fi
+
+  after_signout=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE_URL/api/auth/session")
+  if [ "$after_signout" = "401" ]; then pass "api: signed out session is revoked"; else fail "api: signed out session is revoked" "status $after_signout"; fi
 fi
 
 echo

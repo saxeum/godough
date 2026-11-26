@@ -25,6 +25,11 @@ services:
       # The UI is same-origin through the LB; the Vite dev server is not used
       # inside compose. Keep this list explicit rather than wildcarded.
       TRUSTED_ORIGINS: http://localhost:8080
+      # Local Google credentials come from .env, which is gitignored. Empty
+      # values keep sign-in disabled; the config parser rejects a partial set.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-}
     ports:
       - "127.0.0.1:4000:4000"
     depends_on:
