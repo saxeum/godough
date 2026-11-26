@@ -13,7 +13,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/saxeum/godough/internal/domain/auth"
 	"github.com/saxeum/godough/internal/domain/snippet"
 	"github.com/saxeum/godough/internal/service"
 	"github.com/saxeum/godough/internal/testutil"
@@ -27,11 +29,29 @@ func newRepo() *testutil.SnippetRepo {
 	)
 }
 
+// fakeSessions is the transport test's stand-in for the real session service.
+// The cookie is fixed so the request helper can add it to every handler test;
+// the middleware tests cover the missing, expired and tampered cases.
+type fakeSessions struct{}
+
+func (fakeSessions) Authenticate(_ context.Context, token string) (auth.Session, error) {
+	if token == "test-session" {
+		return auth.Session{ID: 1, UserID: 1, Expires: time.Now().Add(time.Hour)}, nil
+	}
+	return auth.Session{}, auth.ErrNotFound
+}
+
 func newRouter(t *testing.T, repo service.SnippetRepository) http.Handler {
 	t.Helper()
 
 	ready := func(context.Context) error { return nil }
-	return httpapi.NewServer(slog.New(slog.DiscardHandler), service.NewSnippets(repo), ready).Routes()
+	return httpapi.NewServer(
+		slog.New(slog.DiscardHandler),
+		service.NewSnippets(repo),
+		fakeSessions{},
+		[]string{"http://localhost:8080"},
+		ready,
+	).Routes()
 }
 
 // newRouterWithLog keeps the log stream so a test can assert on the level, which
@@ -42,7 +62,13 @@ func newRouterWithLog(t *testing.T, repo service.SnippetRepository) (http.Handle
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	ready := func(context.Context) error { return nil }
-	return httpapi.NewServer(logger, service.NewSnippets(repo), ready).Routes(), &logs
+	return httpapi.NewServer(
+		logger,
+		service.NewSnippets(repo),
+		fakeSessions{},
+		[]string{"http://localhost:8080"},
+		ready,
+	).Routes(), &logs
 }
 
 // do runs one request the way a well-behaved client would: a JSON content type
@@ -70,6 +96,19 @@ func doWith(t *testing.T, handler http.Handler, method, path, body string, heade
 	for k, values := range header {
 		for _, v := range values {
 			req.Header.Add(k, v)
+		}
+	}
+
+	// The handler tests are about handlers, not about auth. A valid cookie and a
+	// trusted origin get them through the two middleware layers; the middleware
+	// tests exercise the rejections.
+	if req.Header.Get("Cookie") == "" {
+		req.AddCookie(&http.Cookie{Name: "session", Value: "test-session"})
+	}
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		if req.Header.Get("Origin") == "" {
+			req.Header.Set("Origin", "http://localhost:8080")
 		}
 	}
 
@@ -322,6 +361,28 @@ func TestUnknownRouteAndWrongMethod(t *testing.T) {
 	}
 }
 
+func TestProbesDoNotRequireASession(t *testing.T) {
+	router := newRouter(t, newRepo())
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s without a session = %d, want %d", path, rec.Code, http.StatusOK)
+		}
+	}
+}
+
+func TestSnippetsRequireASession(t *testing.T) {
+	router := newRouter(t, newRepo())
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /api/snippet without a session = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestProbes(t *testing.T) {
 	router := newRouter(t, newRepo())
 
@@ -341,6 +402,8 @@ func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
 	router := httpapi.NewServer(
 		slog.New(slog.DiscardHandler),
 		service.NewSnippets(newRepo()),
+		fakeSessions{},
+		nil,
 		ready,
 	).Routes()
 

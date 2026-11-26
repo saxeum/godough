@@ -51,13 +51,17 @@ Every `make` target says where it runs, in the text `make help` prints:
 - `[docker]` — a container, started by docker compose
 - `[both]` — a host process against the postgres container
 
-`.env` is read by host targets only. Compose sets `DATABASE_URL` itself, because
-the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
+`.env` is read by host targets only. Compose sets `DATABASE_URL` and
+`TRUSTED_ORIGINS` itself, because the database and the public origin are
+different inside the network than outside it.
 
 - `SNIPPET_ADDR` — host:port the API listens on (`:4000`)
 - `LOG_LEVEL` — `debug`, `info`, `warn` or `error`; defaults to `info`
 - `LOG_FORMAT` — `text` or `json`; defaults to `json`. `.env` sets `text` for a
   host process; containers keep the JSON default
+- `TRUSTED_ORIGINS` — comma-separated exact origins allowed to make
+  cookie-authenticated writes. Empty fails closed; a malformed value refuses to
+  boot
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
   that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
@@ -149,10 +153,17 @@ JSON keys are the spec's, so they are camelCase: `id`, `title`, `content`,
 |---|---|---|
 | GET | `/api/snippet` | every snippet, newest first |
 | GET | `/api/snippet/{id}` | one snippet, `404` JSON if absent |
-| POST | `/api/snippet` | `{Title, Content, ExpiresInDays}` -> `201` + `Location`, `422` with per-field errors |
+| POST | `/api/snippet` | `{title, content, expiresInDays}` -> `201` + `Location`, `422` with per-field errors |
 | DELETE | `/api/snippet/{id}` | `204`, `404` if absent |
 | GET | `/healthz` | liveness: never touches the database |
 | GET | `/readyz` | readiness: pings the database, `503` when it cannot |
+
+Every `/api/snippet` request requires a live `session` cookie; `POST` and
+`DELETE` also require an `Origin` in `TRUSTED_ORIGINS`. Sessions live in
+Postgres for seven days absolute, with no sliding renewal; the cookie is
+`HttpOnly; Secure; SameSite=Lax`, and the database stores only its SHA-256 hash.
+Expired rows are ignored by the lookup and removed at boot. The page shows a
+signed-out state until the sign-in UI lands (#56).
 
 ## Tests
 

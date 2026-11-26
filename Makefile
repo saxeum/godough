@@ -163,7 +163,7 @@ test-db-reset: ## [both] Clear the test database before a run
 		echo "TEST_DATABASE_URL must not equal DATABASE_URL: refusing to clear the development database"; \
 		exit 1; \
 	fi; \
-	psql "$$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DELETE FROM snippets' >/dev/null
+	psql "$$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DELETE FROM sessions; DELETE FROM users; DELETE FROM snippets;' >/dev/null
 
 test: test-db-reset ## [both] All tests against the test database (needs make db-test)
 	$(LOAD_ENV); go test -count=1 -v -cover ./...

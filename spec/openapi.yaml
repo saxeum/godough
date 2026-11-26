@@ -11,6 +11,9 @@ info:
     with a `text/plain` body. The application does not shape it, because doing so
     means restating this routing table in code that can then disagree with it.
     Treat those bodies as opaque; the status code is the whole message.
+
+    Every `/api/snippet` request requires a live session cookie. State-changing
+    requests also require an `Origin` in the configured trusted list.
 servers:
   - url: /
 paths:
@@ -27,6 +30,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Snippet"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -52,6 +57,10 @@ paths:
                 $ref: "#/components/schemas/Snippet"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -75,6 +84,8 @@ paths:
                 $ref: "#/components/schemas/Snippet"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -87,6 +98,10 @@ paths:
           description: Deleted. There is nothing to say back.
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -106,6 +121,18 @@ components:
         type: integer
         format: int64
   responses:
+    Unauthorized:
+      description: No live session cookie, or the session has expired or been revoked.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: The request's Origin is not in the trusted list.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     BadRequest:
       description: The request could not be decoded.
       content:

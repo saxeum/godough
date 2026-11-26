@@ -38,7 +38,10 @@ function SnippetList() {
   const state = useFetched(listSnippets, 'list')
 
   if (state.status === 'loading') return <Message>Loading…</Message>
-  if (state.status === 'failed') return <Message>Could not load snippets: {state.error.message}</Message>
+  if (state.status === 'failed') {
+    if (state.error instanceof ApiError && state.error.status === 401) return <Message>Sign in required.</Message>
+    return <Message>Could not load snippets: {state.error.message}</Message>
+  }
   if (state.data.length === 0) return <Message>No snippets yet.</Message>
 
   return (
@@ -81,6 +84,7 @@ function SnippetView() {
 
   if (state.status === 'loading') return <Message>Loading…</Message>
   if (state.status === 'failed') {
+    if (state.error instanceof ApiError && state.error.status === 401) return <Message>Sign in required.</Message>
     // 404 is a well-formed id that names nothing; 400 is an id that is not a
     // number at all, which the API's router rejects before any handler runs.
     // To someone reading the page both mean the same thing, so both say it.

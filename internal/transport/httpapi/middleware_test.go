@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/saxeum/godough/internal/domain/auth"
 )
 
 // TestRecovererAnswersAJSON500AndKeepsServing is the two halves of the same
@@ -268,5 +270,172 @@ func TestAccessLogLevelFollowsTheStatus(t *testing.T) {
 				t.Errorf("level = %v, want %s", line["level"], tt.level)
 			}
 		})
+	}
+}
+
+type stubSessions struct {
+	session auth.Session
+	err     error
+}
+
+func (s stubSessions) Authenticate(context.Context, string) (auth.Session, error) {
+	return s.session, s.err
+}
+
+func TestSessionValidAuthenticatesTheRequest(t *testing.T) {
+	var seen auth.Session
+	handler := requireSession(
+		stubSessions{session: auth.Session{ID: 3, UserID: 7}},
+		slog.New(slog.DiscardHandler),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var ok bool
+			seen, ok = sessionFromContext(r.Context())
+			if !ok {
+				t.Error("handler saw no session in the context")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/snippet", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "valid"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if seen.UserID != 7 {
+		t.Errorf("session user = %d, want 7", seen.UserID)
+	}
+}
+
+func TestSessionRejectsMissingDeletedExpiredAndTampered(t *testing.T) {
+	notFound := stubSessions{err: auth.ErrNotFound}
+	valid := stubSessions{session: auth.Session{UserID: 1}}
+
+	tests := []struct {
+		name     string
+		sessions stubSessions
+		cookie   *http.Cookie
+	}{
+		{name: "missing", sessions: valid},
+		{name: "deleted", sessions: notFound, cookie: &http.Cookie{Name: sessionCookieName, Value: "deleted"}},
+		{name: "expired", sessions: notFound, cookie: &http.Cookie{Name: sessionCookieName, Value: "expired"}},
+		{name: "tampered", sessions: notFound, cookie: &http.Cookie{Name: sessionCookieName, Value: "tampered"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := requireSession(tt.sessions, slog.New(slog.DiscardHandler), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("the protected handler ran")
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/snippet", nil)
+			if tt.cookie != nil {
+				req.AddCookie(tt.cookie)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", got)
+			}
+		})
+	}
+}
+
+func TestSessionLookupFailureIsAJSON500(t *testing.T) {
+	handler := requireSession(
+		stubSessions{err: errors.New("database down")},
+		slog.New(slog.DiscardHandler),
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Error("the protected handler ran")
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/snippet", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "valid"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestCSRFOriginCheck(t *testing.T) {
+	sessions := stubSessions{session: auth.Session{UserID: 1}}
+	trusted := []string{"http://localhost:8080"}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+	handler := requireSession(sessions, slog.New(slog.DiscardHandler),
+		requireTrustedOrigin(trusted, slog.New(slog.DiscardHandler), next))
+
+	tests := []struct {
+		name   string
+		method string
+		origin string
+		cookie bool
+		want   int
+	}{
+		{name: "no origin", method: http.MethodPost, cookie: true, want: http.StatusForbidden},
+		{name: "wrong origin", method: http.MethodPost, origin: "https://evil.example", cookie: true, want: http.StatusForbidden},
+		{name: "trusted origin", method: http.MethodPost, origin: "http://localhost:8080", cookie: true, want: http.StatusCreated},
+		{name: "delete is checked", method: http.MethodDelete, origin: "https://evil.example", cookie: true, want: http.StatusForbidden},
+		{name: "get is not checked", method: http.MethodGet, cookie: true, want: http.StatusCreated},
+		{name: "anonymous write is 401 before csrf", method: http.MethodPost, origin: "https://evil.example", want: http.StatusUnauthorized},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "/api/snippet/1", nil)
+			if tt.cookie {
+				req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "valid"})
+			}
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetSessionCookieAttributes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	expires := time.Now().Add(time.Hour).Truncate(time.Second)
+	setSessionCookie(rec, "token-value", expires)
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("got %d cookies, want 1", len(cookies))
+	}
+	c := cookies[0]
+	if c.Name != sessionCookieName || c.Value != "token-value" {
+		t.Errorf("cookie = %s=%s", c.Name, c.Value)
+	}
+	if !c.HttpOnly {
+		t.Error("cookie is not HttpOnly")
+	}
+	if !c.Secure {
+		t.Error("cookie is not Secure")
+	}
+	if c.SameSite != http.SameSiteLaxMode {
+		t.Errorf("SameSite = %v, want Lax", c.SameSite)
+	}
+	if c.Path != "/" {
+		t.Errorf("Path = %q, want /", c.Path)
+	}
+	if !c.Expires.Equal(expires) {
+		t.Errorf("Expires = %v, want %v", c.Expires, expires)
 	}
 }

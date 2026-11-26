@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/saxeum/godough/internal/config"
 	"github.com/saxeum/godough/internal/repository/postgres"
+	"github.com/saxeum/godough/internal/service"
 	"github.com/saxeum/godough/internal/transport/httpapi"
 )
 
@@ -175,10 +177,24 @@ func TestAppWiring(t *testing.T) {
 		t.Fatal("New built a server with no handler")
 	}
 
+	// A real session row, because the read path is behind requireSession.
+	token := fmt.Sprintf("wiring-session-%d", time.Now().UnixNano())
+	var userID int64
+	if err := a.db.QueryRow(t.Context(), `INSERT INTO users (sub, email, name) VALUES ($1, $2, $3) RETURNING id`,
+		fmt.Sprintf("wiring-sub-%d", time.Now().UnixNano()), "wiring@example.com", "Wiring").Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := a.db.Exec(t.Context(), `INSERT INTO sessions (token_hash, user_id, expires) VALUES ($1, $2, now() + interval '1 hour')`,
+		service.HashToken(token), userID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
 	// 1. The read path reaches Postgres. This is the assertion that fails if any
 	//    wire in the chain is crossed.
+	req := httptest.NewRequest(http.MethodGet, "/api/snippet", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: token})
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet", nil))
+	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/snippet = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())

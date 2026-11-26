@@ -27,7 +27,9 @@ export default function CreateSnippet() {
       const created = await createSnippet({ title, content, expiresInDays: days })
       navigate(`/snippet/${created.id}`)
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
+      if (err instanceof ApiError && err.status === 401) {
+        setFailed('Sign in required.')
+      } else if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setFieldErrors(err.fieldErrors)
       } else if (err instanceof ApiError) {
         setFailed(`Could not save the snippet (${err.status}).`)
