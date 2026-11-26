@@ -117,3 +117,40 @@ jobs:
       - name: Stop
         if: always()
         run: docker compose down -v
+
+  # Build once and publish by commit SHA. Only master, and only after the tests
+  # that prove the tree can ship. The workflow assumes the ECR role through
+  # GitHub OIDC; there are no static AWS keys.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [test, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-southeast-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
+
+      - uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve registry and tag
+        run: |
+          account=$(aws sts get-caller-identity --query Account --output text)
+          echo "ECR_REGISTRY=${account}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> "$GITHUB_ENV"
+          echo "TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Build and push
+        run: make ecr-push
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0, runs on node24
+        with:
+          go-version-file: infra/aws-test/go.mod
+          cache: true
+
+      - name: Live AWS invariants
+        run: make aws-test

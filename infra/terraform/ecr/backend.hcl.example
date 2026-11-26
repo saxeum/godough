@@ -1,0 +1,4 @@
+# Copy to backend.hcl after #102 has created the state bucket. Do not commit
+# backend.hcl: the bucket name contains the AWS account id.
+bucket = "godough-terraform-state-<account-id>"
+region = "ap-southeast-2"
