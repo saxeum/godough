@@ -69,7 +69,9 @@ different inside the network than outside it.
   on the OAuth client; the local one is
   `http://localhost:8080/api/auth/google/callback`
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
-  that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
+  that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`).
+  Outside the compose network it uses `sslmode=verify-full` and an
+  `sslrootcert` CA bundle
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
   variables rather than one so the migrator cannot accidentally run as the app
   role, which would fail on the first `CREATE TABLE`
@@ -83,6 +85,13 @@ The two runtime variables (`SNIPPET_ADDR`, `DATABASE_URL`) are required. The
 test variables are required by `make db-test` and `make test`. A missing runtime
 value exits at startup with its name; a bad `LOG_LEVEL` or `LOG_FORMAT` exits
 with the offending value in the error.
+
+`.env.example` shows the production TLS form: `verify-full` plus a CA bundle.
+The local compose Postgres has no certificate, so a host process pointed at that
+container needs `sslmode=disable` in its own `.env`; the api container is
+already configured that way. A missing CA is a startup failure, not a fallback
+to plaintext. In deployment the CA bundle is a mounted Secret, and rotating it
+is a restart, not a hot reload.
 
 Every request gets one structured line: `request_id`, `method`, `route`,
 `status`, `duration` and `bytes`. A safe incoming `X-Request-ID` is preserved
