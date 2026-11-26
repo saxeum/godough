@@ -93,6 +93,12 @@ already configured that way. A missing CA is a startup failure, not a fallback
 to plaintext. In deployment the CA bundle is a mounted Secret, and rotating it
 is a restart, not a hot reload.
 
+`make tls-check` reads `DATABASE_URL`, prints every certificate in `sslrootcert`
+and the server's peer certificate, and exits non-zero when anything expires
+inside `TLS_MIN_DAYS` (default 30). It skips `sslmode=disable` so the local
+compose stack remains usable. In #5 this is the command to wire as a CronJob or
+alert, not a check that waits for the first failed connection.
+
 Every request gets one structured line: `request_id`, `method`, `route`,
 `status`, `duration` and `bytes`. A safe incoming `X-Request-ID` is preserved
 and echoed; otherwise one is generated. The same id is on the response and on
@@ -204,6 +210,7 @@ make db-bootstrap   # the app role and its grants (Docker does it on an empty vo
 make db-test        # create, bootstrap and migrate snippet_test
 make codegen-check  # host: fails if the generated code is stale
 make lint           # host: gofmt, staticcheck and oxlint; warnings fail
+make tls-check      # host: CA and server certificate expiry; fails inside 30 days
 make test-unit      # host, no database, no .env (-short)
 make test           # host against the test database; fails without TEST_DATABASE_URL
 make test-race      # host: all tests with the race detector
