@@ -230,9 +230,15 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
-# A launch template is the only way to attach an extra security group to a
-# managed node group. The group is the data stack's, which RDS already trusts on
-# 5432, so the database needs no new rule.
+# A launch template is the only way to set security groups on a managed node
+# group, and setting them **replaces** the cluster security group rather than
+# adding to it: the instance carries this one group and nothing else. The three
+# rules after it are what the cluster security group would otherwise have
+# provided, and without them a node never joins — 10 minutes of `Still creating`,
+# then NodeCreationFailure.
+#
+# The group is the data stack's, which RDS already trusts on 5432, so the
+# database needs no new rule.
 resource "aws_launch_template" "nodes" {
   name_prefix = "${local.cluster_name}-node-"
 
@@ -253,6 +259,41 @@ resource "aws_launch_template" "nodes" {
       Name = "${local.cluster_name}-node"
     }
   }
+}
+
+# Pods get their addresses from ENIs on the node, so this group carries pod-to-pod
+# traffic too: CoreDNS, the API, the VPC CNI and every Service that resolves to a
+# pod. It is the rule the cluster security group would have supplied.
+resource "aws_security_group_rule" "nodes_self" {
+  type              = "ingress"
+  description       = "node and pod traffic within the node group"
+  security_group_id = local.node_security_group
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  self              = true
+}
+
+resource "aws_security_group_rule" "nodes_from_cluster" {
+  type                     = "ingress"
+  description              = "kubelet from the control plane: logs, exec, port-forward, webhooks"
+  security_group_id        = local.node_security_group
+  from_port                = 1025
+  to_port                  = 65535
+  protocol                 = "tcp"
+  source_security_group_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+}
+
+# The missing half of the join: without this the kubelet dials 443 and nothing
+# answers, forever.
+resource "aws_security_group_rule" "cluster_from_nodes" {
+  type                     = "ingress"
+  description              = "node and pod traffic to the Kubernetes API"
+  security_group_id        = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = local.node_security_group
 }
 
 resource "aws_eks_node_group" "staging" {
