@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/saxeum/godough/internal/auth/googleauth"
 	"github.com/saxeum/godough/internal/config"
 	"github.com/saxeum/godough/internal/repository/postgres"
 	"github.com/saxeum/godough/internal/service"
@@ -83,12 +84,32 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 	repo := postgres.NewSnippetRepository(db)
 	svc := service.NewSnippets(repo)
 	sessions := service.NewSessions(postgres.NewSessionRepository(db))
+	users := service.NewUsers(postgres.NewUserRepository(db))
 	if n, err := sessions.DeleteExpired(ctx); err != nil {
 		log.Warn("expired session cleanup failed", "err", err)
 	} else if n > 0 {
 		log.Info("expired sessions removed", "count", n)
 	}
-	handler := httpapi.NewServer(log, svc, sessions, cfg.TrustedOrigins, db.Ping).Routes()
+
+	var google httpapi.GoogleAuth
+	if cfg.Google.Configured() {
+		provider, err := googleauth.New(ctx, cfg.Google.ClientID, cfg.Google.ClientSecret, cfg.Google.RedirectURL, "")
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("google sign-in: %w", err)
+		}
+		google = provider
+	}
+
+	handler := httpapi.NewServer(httpapi.Deps{
+		Log:            log,
+		Snippets:       svc,
+		Sessions:       sessions,
+		Users:          users,
+		Google:         google,
+		TrustedOrigins: cfg.TrustedOrigins,
+		Ready:          db.Ping,
+	}).Routes()
 
 	return &App{
 		log: log,

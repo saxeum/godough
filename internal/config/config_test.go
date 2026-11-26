@@ -41,6 +41,9 @@ func TestFromEnv(t *testing.T) {
 			t.Setenv("LOG_LEVEL", tt.level)
 			t.Setenv("LOG_FORMAT", tt.format)
 			t.Setenv("TRUSTED_ORIGINS", tt.origins)
+			t.Setenv("GOOGLE_CLIENT_ID", "")
+			t.Setenv("GOOGLE_CLIENT_SECRET", "")
+			t.Setenv("GOOGLE_REDIRECT_URL", "")
 
 			cfg, err := FromEnv()
 
@@ -99,5 +102,45 @@ func TestLoggerTextFormat(t *testing.T) {
 	}
 	if strings.HasPrefix(strings.TrimSpace(got), "{") {
 		t.Errorf("text log looks like JSON: %q", got)
+	}
+}
+
+func TestGoogleOAuthConfig(t *testing.T) {
+	tests := []struct {
+		name                 string
+		id, secret, redirect string
+		wantErr              string
+		wantConfigured       bool
+	}{
+		{name: "disabled", wantConfigured: false},
+		{name: "complete", id: "id", secret: "secret", redirect: "https://app.example.com/api/auth/google/callback", wantConfigured: true},
+		{name: "partial", id: "id", wantErr: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URL must be set together"},
+		{name: "not absolute", id: "id", secret: "secret", redirect: "/api/auth/google/callback", wantErr: `GOOGLE_REDIRECT_URL "/api/auth/google/callback": want an absolute http(s) URL without a fragment`},
+		{name: "origin only", id: "id", secret: "secret", redirect: "https://app.example.com", wantErr: `GOOGLE_REDIRECT_URL "https://app.example.com": want the /api/auth/google/callback path`},
+		{name: "wrong path", id: "id", secret: "secret", redirect: "https://app.example.com/login", wantErr: `GOOGLE_REDIRECT_URL "https://app.example.com/login": want the /api/auth/google/callback path`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SNIPPET_ADDR", ":4000")
+			t.Setenv("DATABASE_URL", "postgres://x")
+			t.Setenv("GOOGLE_CLIENT_ID", tt.id)
+			t.Setenv("GOOGLE_CLIENT_SECRET", tt.secret)
+			t.Setenv("GOOGLE_REDIRECT_URL", tt.redirect)
+
+			cfg, err := FromEnv()
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.Google.Configured() != tt.wantConfigured {
+				t.Errorf("Configured = %v, want %v", cfg.Google.Configured(), tt.wantConfigured)
+			}
+		})
 	}
 }

@@ -1,0 +1,165 @@
+package httpapi
+
+import (
+	"context"
+	"crypto/subtle"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/saxeum/godough/internal/auth/googleauth"
+	"github.com/saxeum/godough/internal/domain/auth"
+)
+
+const (
+	oauthStateCookie    = "oauth_state"
+	oauthNonceCookie    = "oauth_nonce"
+	oauthVerifierCookie = "oauth_verifier"
+	oauthCookiePath     = "/api/auth"
+	oauthCookieTTL      = 10 * time.Minute
+)
+
+// GoogleAuth is the provider seam. Tests replace it with a fake; the
+// production implementation lives in internal/auth/googleauth.
+type GoogleAuth interface {
+	AuthCodeURL(state, nonce, verifier string) string
+	Exchange(ctx context.Context, code, verifier, nonce string) (googleauth.Identity, error)
+}
+
+// UserService is the one operation the callback needs.
+type UserService interface {
+	Ensure(ctx context.Context, sub, email, name string) (auth.User, error)
+}
+
+// googleStart begins the authorization-code flow. The state, nonce and PKCE
+// verifier are short-lived, HttpOnly cookies; the callback consumes them once.
+func (s *Server) googleStart(w http.ResponseWriter, r *http.Request) {
+	if s.google == nil {
+		writeJSON(w, http.StatusServiceUnavailable, Error{Error: "sign-in is not configured"})
+		return
+	}
+
+	state, err := googleauth.NewSecret()
+	if err != nil {
+		s.log.Error("sign-in state generation failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+	nonce, err := googleauth.NewSecret()
+	if err != nil {
+		s.log.Error("sign-in nonce generation failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+	verifier, err := googleauth.NewSecret()
+	if err != nil {
+		s.log.Error("sign-in verifier generation failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+
+	setOAuthCookie(w, oauthStateCookie, state)
+	setOAuthCookie(w, oauthNonceCookie, nonce)
+	setOAuthCookie(w, oauthVerifierCookie, verifier)
+
+	http.Redirect(w, r, s.google.AuthCodeURL(state, nonce, verifier), http.StatusFound)
+}
+
+// googleCallback consumes the one-use cookies, exchanges the code and creates
+// the local session. Any failure is logged with the request id and answered
+// with a generic message; the provider error stays in the log.
+func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
+	if s.google == nil {
+		writeJSON(w, http.StatusServiceUnavailable, Error{Error: "sign-in is not configured"})
+		return
+	}
+
+	stateCookie, stateErr := r.Cookie(oauthStateCookie)
+	nonceCookie, nonceErr := r.Cookie(oauthNonceCookie)
+	verifierCookie, verifierErr := r.Cookie(oauthVerifierCookie)
+
+	// Single use: clear all three before anything can fail.
+	clearOAuthCookie(w, oauthStateCookie)
+	clearOAuthCookie(w, oauthNonceCookie)
+	clearOAuthCookie(w, oauthVerifierCookie)
+
+	if stateErr != nil || nonceErr != nil || verifierErr != nil {
+		s.signInFailed(w, r, "missing flow cookies")
+		return
+	}
+
+	queryState := r.URL.Query().Get("state")
+	if subtle.ConstantTimeCompare([]byte(queryState), []byte(stateCookie.Value)) != 1 {
+		s.signInFailed(w, r, "state mismatch")
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		s.signInFailed(w, r, "missing authorization code")
+		return
+	}
+
+	identity, err := s.google.Exchange(r.Context(), code, verifierCookie.Value, nonceCookie.Value)
+	if err != nil {
+		s.log.Error("sign-in exchange failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusBadGateway, Error{Error: "sign-in failed"})
+		return
+	}
+
+	user, err := s.users.Ensure(r.Context(), identity.Sub, identity.Email, identity.Name)
+	if err != nil {
+		s.log.Error("sign-in user upsert failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+
+	token, session, err := s.sessions.Create(r.Context(), user.ID, clientIP(r), r.UserAgent())
+	if err != nil {
+		s.log.Error("sign-in session creation failed", "request_id", requestIDFromContext(r.Context()), "err", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+		return
+	}
+
+	setSessionCookie(w, token, session.Expires)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) signInFailed(w http.ResponseWriter, r *http.Request, reason string) {
+	s.log.Warn("sign-in rejected", "request_id", requestIDFromContext(r.Context()), "reason", reason)
+	writeJSON(w, http.StatusBadRequest, Error{Error: "sign-in failed"})
+}
+
+func setOAuthCookie(w http.ResponseWriter, name, value string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     oauthCookiePath,
+		MaxAge:   int(oauthCookieTTL.Seconds()),
+		Expires:  time.Now().Add(oauthCookieTTL),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearOAuthCookie(w http.ResponseWriter, name string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     oauthCookiePath,
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}

@@ -282,6 +282,10 @@ func (s stubSessions) Authenticate(context.Context, string) (auth.Session, error
 	return s.session, s.err
 }
 
+func (s stubSessions) Create(context.Context, int64, string, string) (string, auth.Session, error) {
+	return "stub-token", s.session, s.err
+}
+
 func TestSessionValidAuthenticatesTheRequest(t *testing.T) {
 	var seen auth.Session
 	handler := requireSession(

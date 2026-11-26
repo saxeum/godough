@@ -30,6 +30,19 @@ type Config struct {
 	LogLevel       slog.Level
 	LogFormat      string
 	TrustedOrigins []string
+	Google         GoogleOAuth
+}
+
+// GoogleOAuth is the server-side authorization-code configuration. All three
+// values are set together, or none are and sign-in is disabled.
+type GoogleOAuth struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+}
+
+func (g GoogleOAuth) Configured() bool {
+	return g.ClientID != "" && g.ClientSecret != "" && g.RedirectURL != ""
 }
 
 // FromEnv reads and validates the environment.
@@ -64,13 +77,46 @@ func FromEnv() (Config, error) {
 		return Config{}, err
 	}
 
+	google, err := parseGoogleOAuth()
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Addr:           addr,
 		DatabaseURL:    dsn,
 		LogLevel:       level,
 		LogFormat:      format,
 		TrustedOrigins: origins,
+		Google:         google,
 	}, nil
+}
+
+// parseGoogleOAuth allows sign-in to be left out entirely; a partially
+// configured provider is a boot error rather than a sign-in button that fails
+// only after the user has been sent to Google.
+func parseGoogleOAuth() (GoogleOAuth, error) {
+	g := GoogleOAuth{
+		ClientID:     strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		ClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
+		RedirectURL:  strings.TrimSpace(os.Getenv("GOOGLE_REDIRECT_URL")),
+	}
+	if !g.Configured() {
+		if g.ClientID != "" || g.ClientSecret != "" || g.RedirectURL != "" {
+			return GoogleOAuth{}, errors.New("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URL must be set together")
+		}
+		return GoogleOAuth{}, nil
+	}
+
+	u, err := url.Parse(g.RedirectURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Fragment != "" {
+		return GoogleOAuth{}, fmt.Errorf("GOOGLE_REDIRECT_URL %q: want an absolute http(s) URL without a fragment", g.RedirectURL)
+	}
+	if u.Path != "/api/auth/google/callback" {
+		return GoogleOAuth{}, fmt.Errorf("GOOGLE_REDIRECT_URL %q: want the /api/auth/google/callback path", g.RedirectURL)
+	}
+
+	return g, nil
 }
 
 // parseTrustedOrigins reads a comma-separated list of absolute http(s) origins.

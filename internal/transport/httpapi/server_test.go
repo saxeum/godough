@@ -41,17 +41,30 @@ func (fakeSessions) Authenticate(_ context.Context, token string) (auth.Session,
 	return auth.Session{}, auth.ErrNotFound
 }
 
+func (fakeSessions) Create(_ context.Context, userID int64, _, _ string) (string, auth.Session, error) {
+	return "test-session", auth.Session{ID: 1, UserID: userID, Expires: time.Now().Add(time.Hour)}, nil
+}
+
+type fakeUsers struct{}
+
+func (fakeUsers) Ensure(_ context.Context, sub, email, name string) (auth.User, error) {
+	return auth.User{ID: 1, Sub: sub, Email: email, Name: name}, nil
+}
+
+func newDeps(log *slog.Logger, repo service.SnippetRepository) httpapi.Deps {
+	return httpapi.Deps{
+		Log:            log,
+		Snippets:       service.NewSnippets(repo),
+		Sessions:       fakeSessions{},
+		Users:          fakeUsers{},
+		TrustedOrigins: []string{"http://localhost:8080"},
+		Ready:          func(context.Context) error { return nil },
+	}
+}
+
 func newRouter(t *testing.T, repo service.SnippetRepository) http.Handler {
 	t.Helper()
-
-	ready := func(context.Context) error { return nil }
-	return httpapi.NewServer(
-		slog.New(slog.DiscardHandler),
-		service.NewSnippets(repo),
-		fakeSessions{},
-		[]string{"http://localhost:8080"},
-		ready,
-	).Routes()
+	return httpapi.NewServer(newDeps(slog.New(slog.DiscardHandler), repo)).Routes()
 }
 
 // newRouterWithLog keeps the log stream so a test can assert on the level, which
@@ -61,14 +74,7 @@ func newRouterWithLog(t *testing.T, repo service.SnippetRepository) (http.Handle
 
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ready := func(context.Context) error { return nil }
-	return httpapi.NewServer(
-		logger,
-		service.NewSnippets(repo),
-		fakeSessions{},
-		[]string{"http://localhost:8080"},
-		ready,
-	).Routes(), &logs
+	return httpapi.NewServer(newDeps(logger, repo)).Routes(), &logs
 }
 
 // do runs one request the way a well-behaved client would: a JSON content type
@@ -399,13 +405,10 @@ func TestProbes(t *testing.T) {
 
 func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
 	ready := func(context.Context) error { return errors.New("pool closed") }
-	router := httpapi.NewServer(
-		slog.New(slog.DiscardHandler),
-		service.NewSnippets(newRepo()),
-		fakeSessions{},
-		nil,
-		ready,
-	).Routes()
+	deps := newDeps(slog.New(slog.DiscardHandler), newRepo())
+	deps.TrustedOrigins = nil
+	deps.Ready = ready
+	router := httpapi.NewServer(deps).Routes()
 
 	rec := do(t, router, http.MethodGet, "/readyz", "")
 
