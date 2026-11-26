@@ -55,6 +55,9 @@ Every `make` target says where it runs, in the text `make help` prints:
 the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
 
 - `SNIPPET_ADDR` — host:port the API listens on (`:4000`)
+- `LOG_LEVEL` — `debug`, `info`, `warn` or `error`; defaults to `info`
+- `LOG_FORMAT` — `text` or `json`; defaults to `json`. `.env` sets `text` for a
+  host process; containers keep the JSON default
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
   that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
@@ -67,8 +70,14 @@ the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
   `schema_migrations`
 
 The two runtime variables (`SNIPPET_ADDR`, `DATABASE_URL`) are required. The
-test variables are required by `make db-test` and `make test`. There are no
-defaults: a missing runtime value exits at startup with its name.
+test variables are required by `make db-test` and `make test`. A missing runtime
+value exits at startup with its name; a bad `LOG_LEVEL` or `LOG_FORMAT` exits
+with the offending value in the error.
+
+Every request gets one structured line: `request_id`, `method`, `route`,
+`status`, `duration` and `bytes`. A safe incoming `X-Request-ID` is preserved
+and echoed; otherwise one is generated. The same id is on the response and on
+the error line for a `5xx`.
 
 ## Contract
 

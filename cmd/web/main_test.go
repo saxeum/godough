@@ -8,6 +8,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/saxeum/godough/internal/config"
 )
 
 // TestRunServesAndShutsDown drives the whole of run: the environment, the
@@ -24,18 +26,23 @@ func TestRunServesAndShutsDown(t *testing.T) {
 	if dsn == "" {
 		t.Fatal("TEST_DATABASE_URL is not set: run make db-test")
 	}
-	// run reads DATABASE_URL; point the process at the test database rather
+	// config.FromEnv reads DATABASE_URL; point it at the test database rather
 	// than the development one.
 	t.Setenv("DATABASE_URL", dsn)
 
 	addr := freeAddr(t)
 	t.Setenv("SNIPPET_ADDR", addr)
 
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, slog.New(slog.DiscardHandler)) }()
+	go func() { done <- run(ctx, cfg, slog.New(slog.DiscardHandler)) }()
 
 	waitForHealthz(t, done, "http://"+addr+"/healthz")
 
