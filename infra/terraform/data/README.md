@@ -1,7 +1,9 @@
 # Staging data stack
 
-This stack creates the staging VPC, the SSM bastion, and the private RDS
-Postgres instance.
+This stack creates the staging VPC, the NAT gateway the EKS nodes reach the
+internet through, the SSM bastion, and the private RDS Postgres instance. The NAT
+is one gateway in one AZ, about $37/month with its address; the reasoning is
+beside it in `main.tf`.
 
 ```
 cp backend.hcl.example backend.hcl
