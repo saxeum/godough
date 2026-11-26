@@ -1,6 +1,6 @@
 # aws-test
 
-Checks the Terraform bootstrap resource in the live AWS account:
+Checks the Terraform bootstrap and ECR resources in the live AWS account:
 
 - the state bucket exists and is readable;
 - all four S3 public-access blocks are enabled;
@@ -8,7 +8,11 @@ Checks the Terraform bootstrap resource in the live AWS account:
 - no ACL grant targets `AllUsers` or `AuthenticatedUsers`;
 - an anonymous HTTPS GET of the bucket root returns `403`, not a listing;
 - a positive control does the same GET against the public NOAA GHCN bucket and
-  requires a `200` listing, proving the fetch itself works.
+  requires a `200` listing, proving the fetch itself works;
+- `godough-api` and `godough-web` exist, are `IMMUTABLE`, scan on push and use
+  AES256;
+- both lifecycle policies expire untagged images after 7 days and keep the most
+  recent 20 tagged images.
 
 It is a separate Go module so the application does not link the AWS SDK.
 

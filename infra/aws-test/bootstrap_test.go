@@ -1,6 +1,6 @@
-// Package awstest checks the Terraform bootstrap resources in the live AWS
-// account. It is a separate module so the application's dependency graph does
-// not grow the AWS SDK; run it from this directory.
+// Package awstest checks the Terraform bootstrap and ECR resources in the live
+// AWS account. It is a separate module so the application's dependency graph
+// does not grow the AWS SDK; run it from this directory.
 package awstest
 
 import (
@@ -37,20 +37,26 @@ type state struct {
 	region string
 }
 
+func loadAWS(t *testing.T) aws.Config {
+	t.Helper()
+
+	cfg, err := config.LoadDefaultConfig(t.Context(), config.WithRegion(awsRegion()))
+	if err != nil {
+		t.Fatalf("load AWS config: %v", err)
+	}
+	return cfg
+}
+
 func loadState(t *testing.T) state {
 	t.Helper()
 
 	ctx := t.Context()
-	region := awsRegion()
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
-	if err != nil {
-		t.Fatalf("load AWS config: %v", err)
-	}
+	cfg := loadAWS(t)
 	bucket, err := stateBucket(ctx, cfg)
 	if err != nil {
 		t.Fatalf("derive bucket name: %v", err)
 	}
-	return state{ctx: ctx, cfg: cfg, bucket: bucket, region: region}
+	return state{ctx: ctx, cfg: cfg, bucket: bucket, region: awsRegion()}
 }
 
 // TestStateBucketIsDeployedAndPrivate is the acceptance check for #102. It
