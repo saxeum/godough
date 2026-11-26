@@ -31,7 +31,7 @@ func newRouter(t *testing.T, repo service.SnippetRepository) http.Handler {
 	t.Helper()
 
 	ready := func(context.Context) error { return nil }
-	return httpapi.NewServer(slog.New(slog.DiscardHandler), service.NewSnippetService(repo), ready).Routes()
+	return httpapi.NewServer(slog.New(slog.DiscardHandler), service.NewSnippets(repo), ready).Routes()
 }
 
 // newRouterWithLog keeps the log stream so a test can assert on the level, which
@@ -42,7 +42,7 @@ func newRouterWithLog(t *testing.T, repo service.SnippetRepository) (http.Handle
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	ready := func(context.Context) error { return nil }
-	return httpapi.NewServer(logger, service.NewSnippetService(repo), ready).Routes(), &logs
+	return httpapi.NewServer(logger, service.NewSnippets(repo), ready).Routes(), &logs
 }
 
 // do runs one request the way a well-behaved client would: a JSON content type
@@ -340,7 +340,7 @@ func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
 	ready := func(context.Context) error { return errors.New("pool closed") }
 	router := httpapi.NewServer(
 		slog.New(slog.DiscardHandler),
-		service.NewSnippetService(newRepo()),
+		service.NewSnippets(newRepo()),
 		ready,
 	).Routes()
 

@@ -18,13 +18,13 @@ import (
 // handlers by hand.
 type Server struct {
 	log      *slog.Logger
-	snippets *service.SnippetService
+	snippets *service.Snippets
 	// ready is the readiness check. It is a function rather than a pool so this
 	// package does not import a driver.
 	ready func(ctx context.Context) error
 }
 
-func NewServer(log *slog.Logger, snippets *service.SnippetService, ready func(ctx context.Context) error) *Server {
+func NewServer(log *slog.Logger, snippets *service.Snippets, ready func(ctx context.Context) error) *Server {
 	return &Server{log: log, snippets: snippets, ready: ready}
 }
 
