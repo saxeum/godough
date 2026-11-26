@@ -45,11 +45,11 @@ func (s *Server) Routes() http.Handler {
 		// MaxBytesReader cutting the body off is a 413, not the 400 a malformed
 		// body gets. Same callback, so the distinction has to be made here.
 		if isBodyTooLarge(err) {
-			s.log.Warn("request body too large", "limit", maxBodyBytes, "method", r.Method, "uri", r.URL.RequestURI())
+			s.log.Warn("request body too large", "request_id", requestIDFromContext(r.Context()), "limit", maxBodyBytes, "method", r.Method, "uri", r.URL.RequestURI())
 			writeJSON(w, http.StatusRequestEntityTooLarge, errorBody(http.StatusRequestEntityTooLarge))
 			return
 		}
-		s.log.Warn("bad request", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
+		s.log.Warn("bad request", "request_id", requestIDFromContext(r.Context()), "err", err, "method", r.Method, "uri", r.URL.RequestURI())
 		writeJSON(w, http.StatusBadRequest, errorBody(http.StatusBadRequest))
 	}
 
@@ -62,18 +62,18 @@ func (s *Server) Routes() http.Handler {
 			// pointless and logging it at ERROR makes the error rate measure
 			// browsers navigating away rather than anything going wrong.
 			if errors.Is(err, context.Canceled) {
-				s.log.Info("request abandoned by the client", "method", r.Method, "uri", r.URL.RequestURI())
+				s.log.Info("request abandoned by the client", "request_id", requestIDFromContext(r.Context()), "method", r.Method, "uri", r.URL.RequestURI())
 				return
 			}
 			// A request that ran out of its own deadline is the server's failure,
 			// not the client's, so it stays a 500 — with the distinction in the
 			// log, because "deadline exceeded" alone does not say which deadline.
 			if errors.Is(err, context.DeadlineExceeded) {
-				s.log.Error("request deadline exceeded", "err", err, "timeout", RequestTimeout, "method", r.Method, "uri", r.URL.RequestURI())
+				s.log.Error("request deadline exceeded", "request_id", requestIDFromContext(r.Context()), "err", err, "timeout", RequestTimeout, "method", r.Method, "uri", r.URL.RequestURI())
 				writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
 				return
 			}
-			s.log.Error("server error", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
+			s.log.Error("server error", "request_id", requestIDFromContext(r.Context()), "err", err, "method", r.Method, "uri", r.URL.RequestURI())
 			writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
 		},
 	})
@@ -86,7 +86,7 @@ func (s *Server) Routes() http.Handler {
 	// Outside, not inside: the generated handler reads the body before any of its
 	// own middleware sees the request. Outermost first, so a panic anywhere below
 	// is recovered, and the deadline covers everything that follows.
-	return recoverer(s.log, requestDeadline(RequestTimeout, bodyGuards(api)))
+	return withRequestID(accessLog(s.log, recoverer(s.log, requestDeadline(RequestTimeout, bodyGuards(api)))))
 }
 
 // healthz says the process is alive. It must not touch the database: a database
@@ -101,7 +101,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := s.ready(ctx); err != nil {
-		s.log.Error("readiness check failed", "err", err)
+		s.log.Error("readiness check failed", "request_id", requestIDFromContext(r.Context()), "err", err)
 		writeJSON(w, http.StatusServiceUnavailable, errorBody(http.StatusServiceUnavailable))
 		return
 	}
@@ -148,7 +148,7 @@ func (s *Server) CreateSnippet(ctx context.Context, request CreateSnippetRequest
 		return nil, err
 	}
 
-	s.log.Info("snippet created", "id", created.ID)
+	s.log.Info("snippet created", "request_id", requestIDFromContext(ctx), "id", created.ID)
 	location := fmt.Sprintf("/api/snippet/%d", created.ID)
 	return CreateSnippet201JSONResponse{
 		Body:    toWire(created),
@@ -166,6 +166,6 @@ func (s *Server) DeleteSnippet(ctx context.Context, request DeleteSnippetRequest
 		return nil, err
 	}
 
-	s.log.Info("snippet deleted", "id", request.Id)
+	s.log.Info("snippet deleted", "request_id", requestIDFromContext(ctx), "id", request.Id)
 	return DeleteSnippet204Response{}, nil
 }

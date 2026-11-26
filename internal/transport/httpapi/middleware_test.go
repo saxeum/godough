@@ -140,3 +140,133 @@ func TestRequestDeadlineRespectsAnEarlierCancellation(t *testing.T) {
 		t.Errorf("context ended with %v, want the caller's cancellation", endedWith)
 	}
 }
+
+func TestRequestIDPreservesASafeIncomingID(t *testing.T) {
+	var seen string
+	handler := withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = requestIDFromContext(r.Context())
+		_, _ = w.Write([]byte("ok"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(requestIDHeader, "upstream-123")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if seen != "upstream-123" {
+		t.Errorf("context request id = %q, want upstream-123", seen)
+	}
+	if got := rec.Header().Get(requestIDHeader); got != "upstream-123" {
+		t.Errorf("response request id = %q, want upstream-123", got)
+	}
+}
+
+func TestRequestIDGeneratesForMissingOrUnsafeValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		incoming string
+	}{
+		{name: "missing"},
+		{name: "contains a space", incoming: "not a request id"},
+		{name: "too long", incoming: strings.Repeat("a", maxRequestIDLength+1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var seen string
+			handler := withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = requestIDFromContext(r.Context())
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.incoming != "" {
+				req.Header.Set(requestIDHeader, tt.incoming)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			got := rec.Header().Get(requestIDHeader)
+			if got == "" {
+				t.Fatal("no request id was generated")
+			}
+			if got == tt.incoming {
+				t.Errorf("request id %q was accepted, want a generated one", got)
+			}
+			if !validRequestID(got) {
+				t.Errorf("generated id %q is not valid", got)
+			}
+			if seen != got {
+				t.Errorf("context request id = %q, response = %q", seen, got)
+			}
+		})
+	}
+}
+
+func TestAccessLogRecordsOneStructuredLine(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /logged", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		_, _ = w.Write([]byte("nope"))
+	})
+
+	handler := withRequestID(accessLog(log, mux))
+	req := httptest.NewRequest(http.MethodGet, "/logged", nil)
+	req.Header.Set(requestIDHeader, "rid-1")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	var line map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &line); err != nil {
+		t.Fatalf("access log is not one JSON line: %v (%q)", err, buf.String())
+	}
+
+	want := map[string]any{
+		"msg":        "request",
+		"request_id": "rid-1",
+		"method":     "GET",
+		"route":      "GET /logged",
+		"status":     float64(http.StatusTeapot),
+		"bytes":      float64(4),
+	}
+	for key, value := range want {
+		if line[key] != value {
+			t.Errorf("%s = %v, want %v", key, line[key], value)
+		}
+	}
+	if _, ok := line["duration"]; !ok {
+		t.Error("access log has no duration")
+	}
+}
+
+func TestAccessLogLevelFollowsTheStatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  int
+		level string
+	}{
+		{name: "client error is info", code: http.StatusNotFound, level: "INFO"},
+		{name: "server error is error", code: http.StatusInternalServerError, level: "ERROR"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			handler := accessLog(log, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.code)
+			}))
+
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+			var line map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &line); err != nil {
+				t.Fatalf("access log is not JSON: %v (%q)", err, buf.String())
+			}
+			if line["level"] != tt.level {
+				t.Errorf("level = %v, want %s", line["level"], tt.level)
+			}
+		})
+	}
+}
