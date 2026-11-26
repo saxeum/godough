@@ -20,9 +20,13 @@ func TestRunServesAndShutsDown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("needs a database: make db-up db-migrate, then make test")
 	}
-	if os.Getenv("DATABASE_URL") == "" {
-		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("TEST_DATABASE_URL is not set: run make db-test")
 	}
+	// run reads DATABASE_URL; point the process at the test database rather
+	// than the development one.
+	t.Setenv("DATABASE_URL", dsn)
 
 	addr := freeAddr(t)
 	t.Setenv("SNIPPET_ADDR", addr)

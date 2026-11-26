@@ -159,9 +159,9 @@ func TestAppWiring(t *testing.T) {
 		t.Skip("database test: make db-up db-migrate, then make test")
 	}
 
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
+		t.Fatal("TEST_DATABASE_URL is not set: run make db-test")
 	}
 
 	a, err := New(t.Context(), config.Config{Addr: "127.0.0.1:0", DatabaseURL: dsn}, slog.New(slog.DiscardHandler))

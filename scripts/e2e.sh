@@ -52,6 +52,17 @@ print($3)
   if [ "$got" = "True" ]; then pass "$1 ($2)"; else fail "$1 ($2)" "got: $got"; fi
 }
 
+seed_id() { # title
+  body "/api/snippet" | python3 -c "
+import json,sys
+try:
+    items = json.load(sys.stdin)
+except Exception as exc:
+    print('not json: %s' % exc, file=sys.stderr); raise SystemExit(1)
+print(next((str(x['id']) for x in items if x['title'] == sys.argv[1]), ''))
+" "$1"
+}
+
 echo "# $BASE_URL"
 echo "# api $API_URL"
 
@@ -73,12 +84,17 @@ ctype=$(content_type "/api/snippet")
 SEEDS="('First autumn morning', 'Over the wintry forest', 'An old silent pond')"
 expect_json "api: list has the seed snippets, newest first" "/api/snippet" \
   "[t for t in (x['title'] for x in d) if t in $SEEDS] == list($SEEDS)"
-expect_json "api: one snippet" "/api/snippet/1" "d['id'] == 1 and d['title'] == 'An old silent pond'"
+seed_pond=$(seed_id "An old silent pond")
+if [ -z "$seed_pond" ]; then
+  fail "api: seed snippet present" "no 'An old silent pond' in the list"
+else
+  expect_json "api: one snippet" "/api/snippet/$seed_pond" "d['id'] == $seed_pond and d['title'] == 'An old silent pond'"
+fi
 # Not an integer at all: the router rejects it before any handler runs.
 expect_status "api: malformed id is 400" "/api/snippet/abc" 400
 expect_json "api: malformed id is a JSON error" "/api/snippet/abc" "d.get('error') == 'Bad Request'"
 expect_status "api: missing id is 404" "/api/snippet/999" 404
-expect_status "api: wrong method is 405" "/api/snippet/1" 405 POST
+expect_status "api: wrong method is 405" "/api/snippet/999" 405 POST
 
 # --- the web container behind the LB ---------------------------------------
 expect_status "web: index" "/" 200
@@ -121,11 +137,15 @@ else
     fail "render: list shows the three seed snippets" "the rendered DOM is missing titles or the heading"
   fi
 
-  dom=$(render "/snippet/1")
-  if [[ "$dom" == *"An old silent pond..."* ]]; then
-    pass "render: view shows the snippet"
+  if [ -n "$seed_pond" ]; then
+    dom=$(render "/snippet/$seed_pond")
+    if [[ "$dom" == *"An old silent pond..."* ]]; then
+      pass "render: view shows the snippet"
+    else
+      fail "render: view shows the snippet" "the rendered DOM has no snippet body"
+    fi
   else
-    fail "render: view shows the snippet" "the rendered DOM has no snippet body"
+    fail "render: view shows the snippet" "no seed id to render"
   fi
 
   dom=$(render "/snippet/abc")

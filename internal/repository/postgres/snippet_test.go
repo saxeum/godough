@@ -24,9 +24,9 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("database test: make db-up db-migrate, then make test")
 	}
 
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
+		t.Fatal("TEST_DATABASE_URL is not set: run make db-test")
 	}
 
 	p, err := NewPool(t.Context(), dsn)
