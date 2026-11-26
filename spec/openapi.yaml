@@ -46,6 +46,10 @@ paths:
                 $ref: "#/components/schemas/Snippet"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "422":
           $ref: "#/components/responses/ValidationError"
         "500":
@@ -104,6 +108,23 @@ components:
             $ref: "#/components/schemas/Error"
     NotFound:
       description: No snippet with that id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: |
+        The body is larger than the API will read. Enforced by the application,
+        not only by the load balancer, so it holds for a request that reaches
+        the pod directly.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedMediaType:
+      description: |
+        A create request must declare `Content-Type: application/json`. A charset
+        parameter is accepted.
       content:
         application/json:
           schema:

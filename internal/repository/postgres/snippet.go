@@ -8,12 +8,39 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/saxeum/godough/internal/domain/snippet"
 )
+
+// row is the shape of one snippets row: the columns of the query, in order.
+//
+// It exists so the scan and the query are in the same file. Scanning straight
+// into snippet.Snippet, matching by field name, made
+// the domain package implicitly coupled to column names and turned "add a field
+// to the domain type" into a runtime failure in a package the author was not
+// looking at. Positional scanning into a local struct keeps the coupling here,
+// next to the SQL that has to change with it.
+type row struct {
+	ID      int64
+	Title   string
+	Content string
+	Created time.Time
+	Expires time.Time
+}
+
+func (r row) toDomain() snippet.Snippet {
+	return snippet.Snippet{
+		ID:      r.ID,
+		Title:   r.Title,
+		Content: r.Content,
+		Created: r.Created,
+		Expires: r.Expires,
+	}
+}
 
 // SnippetRepository talks to the snippets table.
 type SnippetRepository struct {
@@ -35,9 +62,15 @@ func (r *SnippetRepository) List(ctx context.Context) ([]snippet.Snippet, error)
 		return nil, fmt.Errorf("query snippets: %w", err)
 	}
 
-	items, err := pgx.CollectRows(rows, pgx.RowToStructByName[snippet.Snippet])
+	scanned, err := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
 	if err != nil {
 		return nil, fmt.Errorf("collect snippets: %w", err)
+	}
+
+	// Allocated, not nil: a nil slice marshals to null and the contract says [].
+	items := make([]snippet.Snippet, 0, len(scanned))
+	for _, r := range scanned {
+		items = append(items, r.toDomain())
 	}
 
 	return items, nil
@@ -53,7 +86,7 @@ func (r *SnippetRepository) Get(ctx context.Context, id int64) (snippet.Snippet,
 		return snippet.Snippet{}, fmt.Errorf("query snippet %d: %w", id, err)
 	}
 
-	item, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[snippet.Snippet])
+	scanned, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByPos[row])
 	if errors.Is(err, pgx.ErrNoRows) {
 		return snippet.Snippet{}, snippet.ErrNotFound
 	}
@@ -61,7 +94,7 @@ func (r *SnippetRepository) Get(ctx context.Context, id int64) (snippet.Snippet,
 		return snippet.Snippet{}, fmt.Errorf("collect snippet %d: %w", id, err)
 	}
 
-	return item, nil
+	return scanned.toDomain(), nil
 }
 
 // Insert writes one snippet and returns the row as the database stored it, so
@@ -75,12 +108,12 @@ func (r *SnippetRepository) Insert(ctx context.Context, in snippet.New) (snippet
 		return snippet.Snippet{}, fmt.Errorf("insert snippet: %w", err)
 	}
 
-	item, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[snippet.Snippet])
+	scanned, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByPos[row])
 	if err != nil {
 		return snippet.Snippet{}, fmt.Errorf("collect inserted snippet: %w", err)
 	}
 
-	return item, nil
+	return scanned.toDomain(), nil
 }
 
 // Delete removes one snippet, or reports snippet.ErrNotFound when it matched

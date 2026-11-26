@@ -1,9 +1,11 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -83,17 +85,47 @@ func newRouter(t *testing.T, repo service.SnippetRepository) http.Handler {
 	return httpapi.NewServer(slog.New(slog.DiscardHandler), service.NewSnippetService(repo), ready).Routes()
 }
 
-// do runs one request and returns the recorder, so each test reads the way the
-// client sees it: a status, a content type and a body.
+// newRouterWithLog keeps the log stream so a test can assert on the level, which
+// is the difference between "a client left" and "the server is broken".
+func newRouterWithLog(t *testing.T, repo service.SnippetRepository) (http.Handler, *bytes.Buffer) {
+	t.Helper()
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ready := func(context.Context) error { return nil }
+	return httpapi.NewServer(logger, service.NewSnippetService(repo), ready).Routes(), &logs
+}
+
+// do runs one request the way a well-behaved client would: a JSON content type
+// whenever it carries a body.
 func do(t *testing.T, handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	header := http.Header{}
+	if body != "" {
+		header.Set("Content-Type", "application/json")
+	}
+	return doWith(t, handler, method, path, body, header)
+}
+
+// doWith is do with the headers under the test's control, for the requests that
+// are deliberately malformed.
+func doWith(t *testing.T, handler http.Handler, method, path, body string, header http.Header) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var reader io.Reader
 	if body != "" {
 		reader = strings.NewReader(body)
 	}
+	req := httptest.NewRequest(method, path, reader)
+	for k, values := range header {
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
+	}
+
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(method, path, reader))
+	handler.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -316,6 +348,9 @@ func TestUnknownRouteAndWrongMethod(t *testing.T) {
 	if rec := do(t, router, http.MethodGet, "/api/snippets", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("old list path: status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
+	// 405, not the 415 the content-type guard would give a bodiless POST: the
+	// guard may not pre-empt routing. Recorded here because it is an ordering
+	// decision, not an accident.
 	if rec := do(t, router, http.MethodPost, "/api/snippet/1", ""); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("wrong method: status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
 	}
@@ -354,5 +389,79 @@ func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Type"); got != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+}
+
+// The body limit has to live in the application, because the generated handler
+// reads r.Body before any of its own middleware runs. nginx enforces the same
+// number, which is exactly why this was invisible: the request never reached the
+// pod in development.
+func TestBodyLimit(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	oversized := `{"title":"big","content":"` + strings.Repeat("a", 2<<20) + `","expiresInDays":7}`
+	rec := do(t, router, http.MethodPost, "/api/snippet", oversized)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	if body := decode[map[string]string](t, rec); body["error"] != "Request Entity Too Large" {
+		t.Errorf("body = %v, want the JSON error shape", body)
+	}
+}
+
+func TestContentTypeIsRequired(t *testing.T) {
+	const valid = `{"title":"t","content":"c","expiresInDays":7}`
+
+	tests := []struct {
+		name        string
+		contentType string
+		want        int
+	}{
+		{name: "absent", contentType: "", want: http.StatusUnsupportedMediaType},
+		{name: "text/plain", contentType: "text/plain", want: http.StatusUnsupportedMediaType},
+		// The three a cross-site form can send without a preflight.
+		{name: "form encoded", contentType: "application/x-www-form-urlencoded", want: http.StatusUnsupportedMediaType},
+		{name: "multipart", contentType: "multipart/form-data; boundary=x", want: http.StatusUnsupportedMediaType},
+		{name: "json", contentType: "application/json", want: http.StatusCreated},
+		{name: "json with charset", contentType: "application/json; charset=utf-8", want: http.StatusCreated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := http.Header{}
+			if tt.contentType != "" {
+				header.Set("Content-Type", tt.contentType)
+			}
+			rec := doWith(t, newRouter(t, newFakeRepo()), http.MethodPost, "/api/snippet", valid, header)
+
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A client that navigates away mid-request cancels the context, and the
+// cancellation comes back up through the layers as an error. It is not a fault,
+// and counting it as one makes the error rate measure browsers.
+func TestCancelledRequestIsNotAServerError(t *testing.T) {
+	repo := newFakeRepo()
+	repo.err = fmt.Errorf("query snippets: %w", context.Canceled)
+	router, logs := newRouterWithLog(t, repo)
+
+	rec := do(t, router, http.MethodGet, "/api/snippet", "")
+
+	if rec.Body.Len() != 0 {
+		t.Errorf("wrote %q to an abandoned request, want nothing", rec.Body.String())
+	}
+	if got := logs.String(); strings.Contains(got, "level=ERROR") {
+		t.Errorf("logged a cancellation at ERROR:\n%s", got)
+	}
+	if got := logs.String(); !strings.Contains(got, "abandoned") {
+		t.Errorf("expected an info line about the abandoned request, got:\n%s", got)
 	}
 }

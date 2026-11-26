@@ -11,9 +11,13 @@ import (
 	"github.com/saxeum/godough/internal/domain/snippet"
 )
 
-// pool opens the database the DSN names, or fails: a test that silently skips
-// when the database is absent would report green for work it never did.
-func pool(t *testing.T) *pgxpool.Pool {
+// testPool opens the database the DSN names, or fails: a test that silently
+// skips when the database is absent would report green for work it never did.
+//
+// It goes through NewPool rather than pgxpool.New so the tests run against the
+// same session configuration the process does. A test pool built another way
+// would pass while production ran with a different statement_timeout.
+func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
 	if testing.Short() {
@@ -25,7 +29,7 @@ func pool(t *testing.T) *pgxpool.Pool {
 		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
 	}
 
-	p, err := pgxpool.New(t.Context(), dsn)
+	p, err := NewPool(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
@@ -38,7 +42,7 @@ func pool(t *testing.T) *pgxpool.Pool {
 // it asserts on, so it does not depend on which seed rows the database happens
 // to hold.
 func TestInsertGetDelete(t *testing.T) {
-	repo := NewSnippetRepository(pool(t))
+	repo := NewSnippetRepository(testPool(t))
 	ctx := t.Context()
 
 	created, err := repo.Insert(ctx, snippet.New{Title: "repository round trip", Content: "first\nsecond", ExpiresInDays: 7})
@@ -79,7 +83,7 @@ func TestInsertGetDelete(t *testing.T) {
 }
 
 func TestListIsNewestFirstAndIncludesTheNewRow(t *testing.T) {
-	repo := NewSnippetRepository(pool(t))
+	repo := NewSnippetRepository(testPool(t))
 	ctx := t.Context()
 
 	before, err := repo.List(ctx)
@@ -116,7 +120,7 @@ func TestListIsNewestFirstAndIncludesTheNewRow(t *testing.T) {
 // TestListIsAnAllocatedSliceNotNil guards the JSON: a nil slice marshals to
 // null, and the contract says an empty list is [].
 func TestListIsAnAllocatedSliceNotNil(t *testing.T) {
-	repo := NewSnippetRepository(pool(t))
+	repo := NewSnippetRepository(testPool(t))
 
 	items, err := repo.List(t.Context())
 	if err != nil {
@@ -124,5 +128,42 @@ func TestListIsAnAllocatedSliceNotNil(t *testing.T) {
 	}
 	if items == nil {
 		t.Error("List returned nil, which marshals to null; want an allocated slice")
+	}
+}
+
+// AfterConnect has to run for every connection, including those opened later.
+// Two held at once proves it is a per-connection setting and not a one-off
+// applied to whichever connection happened to be created first.
+func TestSessionLimitsAreSetOnEveryConnection(t *testing.T) {
+	pool := testPool(t)
+	ctx := t.Context()
+
+	first, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer first.Release()
+
+	second, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire a second connection: %v", err)
+	}
+	defer second.Release()
+
+	for i, conn := range []*pgxpool.Conn{first, second} {
+		var statement, lock string
+		if err := conn.QueryRow(ctx, "SHOW statement_timeout").Scan(&statement); err != nil {
+			t.Fatalf("connection %d: show statement_timeout: %v", i, err)
+		}
+		if err := conn.QueryRow(ctx, "SHOW lock_timeout").Scan(&lock); err != nil {
+			t.Fatalf("connection %d: show lock_timeout: %v", i, err)
+		}
+
+		if statement != StatementTimeout {
+			t.Errorf("connection %d: statement_timeout = %q, want %q", i, statement, StatementTimeout)
+		}
+		if lock != LockTimeout {
+			t.Errorf("connection %d: lock_timeout = %q, want %q", i, lock, LockTimeout)
+		}
 	}
 }
