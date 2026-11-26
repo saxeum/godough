@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -10,17 +11,10 @@ import (
 
 // Session limits applied to every connection in the pool.
 //
-// Postgres defaults statement_timeout to zero, which is no limit at all, so a
-// query that waits on a lock or scans a growing table holds its connection until
-// the client gives up. With one connection per concurrent request, a handful of
-// those is the whole replica. A bound here is the difference between a slow
-// query and an outage.
-//
-// statement_timeout must stay below any per-request deadline (#36): if the
-// client gives up first, the server keeps working on a request nobody wants.
+// Postgres defaults statement_timeout to zero, which is no limit at all.
 const (
-	StatementTimeout = "5s"
-	LockTimeout      = "2s"
+	StatementTimeout = 5 * time.Second
+	LockTimeout      = 2 * time.Second
 )
 
 // NewPool opens the connection pool and applies the session limits to every
@@ -34,10 +28,10 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		// set_config rather than SET: SET does not take parameters.
-		if _, err := conn.Exec(ctx, `SELECT set_config('statement_timeout', $1, false)`, StatementTimeout); err != nil {
+		if _, err := conn.Exec(ctx, `SELECT set_config('statement_timeout', $1, false)`, StatementTimeout.String()); err != nil {
 			return fmt.Errorf("set statement_timeout: %w", err)
 		}
-		if _, err := conn.Exec(ctx, `SELECT set_config('lock_timeout', $1, false)`, LockTimeout); err != nil {
+		if _, err := conn.Exec(ctx, `SELECT set_config('lock_timeout', $1, false)`, LockTimeout.String()); err != nil {
 			return fmt.Errorf("set lock_timeout: %w", err)
 		}
 		return nil

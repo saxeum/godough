@@ -22,24 +22,16 @@ import (
 
 const (
 	readHeaderTimeout = 5 * time.Second
-	// readTimeout bounds the whole request, headers and body. The body is capped
-	// at 1 MiB in the transport, so a client that needs longer than this is
-	// trickling bytes on purpose.
-	readTimeout = 10 * time.Second
-	// writeTimeout must exceed the handler's own deadline, or the connection is
-	// cut before the handler can report why it gave up.
-	writeTimeout = httpapi.RequestTimeout + 5*time.Second
-	idleTimeout  = 60 * time.Second
-	// maxHeaderBytes is 1 MiB, the same as the body cap. Go's default is 1 MiB
-	// too, but naming it means a change here is visible rather than inherited.
-	maxHeaderBytes = 1 << 20
+	readTimeout       = 10 * time.Second
+	idleTimeout       = 60 * time.Second
+	maxHeaderBytes    = 1 << 20
 
-	// shutdownGrace is how long a draining server waits for in-flight requests.
-	// Kubernetes' terminationGracePeriodSeconds must exceed this plus its preStop
-	// hook, or the pod is killed mid-drain. It is a constant and not a setting
-	// on purpose: the relationship to the manifest is the thing that matters, and
-	// two places to configure one number is how they come to disagree.
-	shutdownGrace = 10 * time.Second
+	// A request may run for httpapi.RequestTimeout, so anything that waits for
+	// one has to outlast it: the time allowed to write the response, and the time
+	// a drain waits before closing connections.
+	responseOverhead = 5 * time.Second
+	writeTimeout     = httpapi.RequestTimeout + responseOverhead
+	shutdownGrace    = httpapi.RequestTimeout + responseOverhead
 )
 
 // newHTTPServer builds the server with every limit named.
