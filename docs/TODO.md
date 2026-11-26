@@ -1,8 +1,9 @@
 # Prioritised backlog
 
-Reviewed against `origin/master` at `f9d0e43`. PR **#110** (`infra/rds-vpc`, VPC +
-private RDS) is open — do not treat its resources as merged infrastructure until
-the human merges it.
+Reviewed against `origin/master` at `bea8ba4`, the merge of PR **#110**
+(`infra/rds-vpc`, VPC + private RDS). That code is merged. Whether it is applied
+in the account is not recorded in this repo, so check `terraform state list` in
+`infra/terraform/data` before assuming a resource exists.
 
 **The snippet app is the fixture; the platform is the product.** Priority goes
 to work every future CRUD SaaS inherits: identity, tenancy, hermetic tests,
@@ -34,7 +35,7 @@ a reusable pattern does not earn a place in the queue.
 | 1 | #102 | done | S3 Terraform state bucket, versioned, SSE-KMS, TLS-only; live `aws-test` |
 | 2 | #103 + #104 | done | ECR repos, GitHub OIDC publish role, `make ecr-login/build/push/pull-test` |
 | 3 | #38 | done | `verify-full` DSN template; `cmd/tlscheck` / `make tls-check` |
-| 4 | #110 | open | Staging VPC, private RDS Postgres 17.12, SSM bastion; RDS reachable through `make rds-tunnel` |
+| 4 | #110 | done | Staging VPC, private RDS Postgres 17.12, SSM bastion; merged, applied state to be confirmed |
 | 5 | #117 | next | EKS cluster with one normal managed node group |
 | 6 | #5 | epic | Remaining deploy work: manifests, Ingress/ALB, secrets/IRSA, edge ownership |
 
@@ -118,7 +119,7 @@ Do not implement #48/#42/#43 until #5 records which layer owns each behaviour.
 
 ## Do not start yet
 
-- Any next ticket before PR #110 is merged by the human.
+- Any next ticket before PR #118 (this backlog) is merged by the human.
 - #115 or #116 before #117.
 - #115 before #112 and #113.
 - #48/#42/#43 before #5's topology decision.
