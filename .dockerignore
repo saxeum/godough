@@ -7,6 +7,9 @@ coverage.html
 .env
 docker-compose.yml
 nginx
-migrations
+# migrations is not excluded: the build stage embeds the .sql in the migrator
+# binary, so the files must reach `go build` even though the final image has no
+# /migrations directory. It was excluded, and the host build stayed green while
+# the image build could not find package migrations.
 ui
 Makefile

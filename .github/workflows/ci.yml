@@ -83,7 +83,7 @@ jobs:
         run: psql "$TEST_DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f db/bootstrap.sql
 
       - name: Migrate the test database
-        run: DATABASE_URL_OWNER="$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate -dir migrations
+        run: DATABASE_URL_OWNER="$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate
 
       # -count=1: the database is external state the test cache cannot see.
       # -race: the auth work adds concurrency; find races before it lands.
