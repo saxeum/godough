@@ -60,11 +60,15 @@ the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
   variables rather than one so the migrator cannot accidentally run as the app
   role, which would fail on the first `CREATE TABLE`
+- `TEST_DATABASE_URL` — the application role's DSN for `snippet_test`;
+  `make test` refuses to run without it
+- `TEST_DATABASE_URL_OWNER` — the owner's DSN for `make db-test`
 - Migrations run as `godough`, the owner, and record themselves in
   `schema_migrations`
 
-Both variables are required. There are no defaults: a missing one exits at
-startup with its name.
+The two runtime variables (`SNIPPET_ADDR`, `DATABASE_URL`) are required. The
+test variables are required by `make db-test` and `make test`. There are no
+defaults: a missing runtime value exits at startup with its name.
 
 ## Contract
 
@@ -145,13 +149,19 @@ JSON keys are the spec's, so they are camelCase: `id`, `title`, `content`,
 
 ```
 make db-bootstrap   # the app role and its grants (Docker does it on an empty volume)
+make db-test        # create, bootstrap and migrate snippet_test
 make codegen-check  # host: fails if the generated code is stale
 make test-unit      # host, no database, no .env (-short)
-make test           # host against the postgres container; fails without it
+make test           # host against the test database; fails without TEST_DATABASE_URL
 make e2e            # against the running stack on :8080
 make vuln           # govulncheck: vulnerabilities reachable from this code
 make vuln-images    # trivy: fixable HIGH/CRITICAL in both images
 ```
+
+`make db-test` starts postgres if needed, creates `snippet_test`, applies the
+application-role bootstrap and the migrations. It is safe to re-run. `make test`
+clears `snippets` with the `psql` client before the run, so a failed run cannot
+poison the next one, and it never writes to the development database.
 
 `make vuln` runs a pinned `govulncheck` via `go run`, so there is nothing to
 install and `go.mod` is untouched; `make vuln-binary` runs the same scan against

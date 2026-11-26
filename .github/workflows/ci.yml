@@ -28,9 +28,10 @@ jobs:
           --health-retries 10
     env:
       # The tests run as the application role, so the grants they exercise are
-      # the grants production has. The owner's credentials are only for the steps
-      # that create things.
-      DATABASE_URL: postgres://godough_app:snippet_app@localhost:5432/snippet?sslmode=disable
+      # the grants production has. The owner's credentials are only for the
+      # steps that create things.
+      TEST_DATABASE_URL: postgres://godough_app:snippet_app@localhost:5432/snippet_test?sslmode=disable
+      TEST_DATABASE_URL_OWNER: postgres://godough:snippet@localhost:5432/snippet_test?sslmode=disable
       DATABASE_URL_OWNER: postgres://godough:snippet@localhost:5432/snippet?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
@@ -63,15 +64,18 @@ jobs:
       - name: Generated code is up to date
         run: make codegen-check
 
-      - name: Bootstrap the application role
-        run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f db/bootstrap.sql
+      - name: Create the test database
+        run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE snippet_test'
 
-      - name: Migrate
-        run: go run ./cmd/migrate -dir migrations
+      - name: Bootstrap the application role on the test database
+        run: psql "$TEST_DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f db/bootstrap.sql
+
+      - name: Migrate the test database
+        run: DATABASE_URL_OWNER="$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate -dir migrations
 
       # -count=1: the database is external state the test cache cannot see.
       - name: Test
-        run: go test -count=1 -v -cover ./...
+        run: make test
 
   # The stack as a user sees it: real images, real LB, real database. The
   # browser half is Chrome from the runner image (REQUIRE_BROWSER=1 makes its

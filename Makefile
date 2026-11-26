@@ -1,5 +1,5 @@
 BINARY := bin/godough
-LOAD_ENV := set -a && . ./.env && set +a
+LOAD_ENV := set -a; if [ -f .env ]; then . ./.env; fi; set +a
 
 # Pinned, and run with `go run` so nothing has to be installed and go.mod is
 # not touched. The vulnerability database updates itself.
@@ -41,7 +41,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover cover-raw vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate codegen codegen-go codegen-ts codegen-check
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover cover-raw vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -74,7 +74,7 @@ build: ## [host] Compile the API to bin/godough
 	go build -o $(BINARY) ./cmd/web
 
 run: ## [host] Run the API only (:4000, .env; the UI is make ui-dev)
-	$(LOAD_ENV) && go run ./cmd/web
+	$(LOAD_ENV); go run ./cmd/web
 
 ui-install: ## [host] Install UI dependencies
 	npm --prefix ui install
@@ -147,11 +147,23 @@ e2e: ## [docker] End-to-end checks against the running stack (:8080)
 test-unit: ## [host] Fast tests, no database, no .env (-short)
 	go test -count=1 -short -v ./...
 
-test: ## [both] All tests, including the database (needs make db-up db-migrate)
-	$(LOAD_ENV) && go test -count=1 -v -cover ./...
+# The test database is disposable. Clear it before each run so a failed run
+# cannot poison the next one. DELETE, not TRUNCATE: the application role has
+# DELETE and does not own the table.
+test-db-reset: ## [both] Clear the test database before a run
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; \
+	: "$${TEST_DATABASE_URL:?TEST_DATABASE_URL is not set: copy .env.example to .env and run make db-test}"; \
+	if [ -n "$$DATABASE_URL" ] && [ "$$TEST_DATABASE_URL" = "$$DATABASE_URL" ]; then \
+		echo "TEST_DATABASE_URL must not equal DATABASE_URL: refusing to clear the development database"; \
+		exit 1; \
+	fi; \
+	psql "$$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DELETE FROM snippets' >/dev/null
 
-cover: ## [both] HTML coverage report: cross-package counted, generated code excluded
-	$(LOAD_ENV) && go test -count=1 -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
+test: test-db-reset ## [both] All tests against the test database (needs make db-test)
+	$(LOAD_ENV); go test -count=1 -v -cover ./...
+
+cover: test-db-reset ## [both] HTML coverage report: cross-package counted, generated code excluded
+	$(LOAD_ENV); go test -count=1 -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
 	@grep -v "$(COVER_GENERATED)" $(COVER_PROFILE) > $(COVER_FILTERED) || true
 	@go tool cover -func=$(COVER_FILTERED) | tail -1
 	go tool cover -html=$(COVER_FILTERED) -o coverage.html
@@ -169,6 +181,17 @@ db-bootstrap: ## [docker] Create the application role and its grants (once per c
 
 db-migrate: ## [both] Apply pending migrations/*.sql (reads DATABASE_URL_OWNER)
 	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; go run ./cmd/migrate -dir migrations
+
+db-test: db-up ## [both] Create, bootstrap and migrate the test database
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; \
+	: "$${TEST_DATABASE_URL_OWNER:?TEST_DATABASE_URL_OWNER is not set: copy .env.example to .env}"; \
+	if docker compose exec -T postgres psql -U godough -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='snippet_test'" | grep -qx 1; then \
+		echo "snippet_test already exists"; \
+	else \
+		docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d postgres -c "CREATE DATABASE snippet_test"; \
+	fi; \
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet_test -1 < db/bootstrap.sql; \
+	DATABASE_URL_OWNER="$$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate -dir migrations
 
 stack-up: ## [docker] Build and start postgres, api, web and the LB (:8080)
 	docker compose up -d --wait --build
