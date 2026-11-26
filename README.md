@@ -286,10 +286,13 @@ becomes wrong the moment it is fixed.
 ## Publishing images
 
 ```
-make ecr-login ECR_REGISTRY=<registry>
-make ecr-push ECR_REGISTRY=<registry> TAG=<commit-sha>
-make ecr-pull-test ECR_REGISTRY=<registry> TAG=<commit-sha>
+make ecr-push
+make ecr-pull-test
 ```
+
+`ECR_REGISTRY` defaults to `<account>.dkr.ecr.<region>.amazonaws.com` from the
+current AWS credentials, and `TAG` defaults to `git rev-parse HEAD`. Override
+either only when you need to.
 
 `ecr-pull-test` pulls the pushed images back, starts the compose stack from them and runs `make e2e`.
 

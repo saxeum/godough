@@ -186,7 +186,8 @@ cover-raw: cover ## [both] The same run, unfiltered: generated code included
 # ---- infrastructure -----------------------------------------------------
 
 AWS_REGION ?= ap-southeast-2
-ECR_REGISTRY ?=
+# Derived lazily, so `make help` and the non-ECR targets never call STS.
+ECR_REGISTRY ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null | sed 's/$$/.dkr.ecr.$(AWS_REGION).amazonaws.com/')
 ECR_DOCKER_CONFIG ?= $(CURDIR)/.docker-ecr
 TAG ?= $(shell git rev-parse HEAD)
 
