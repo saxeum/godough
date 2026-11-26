@@ -70,6 +70,11 @@ jobs:
       - name: Generated code is up to date
         run: make codegen-check
 
+      # The deploy charts are the thing #125 ships; a chart that does not render
+      # is a rollout that fails at apply time rather than here.
+      - name: Lint the charts
+        run: make charts-lint
+
       - name: UI tests
         run: npm --prefix ui test
 

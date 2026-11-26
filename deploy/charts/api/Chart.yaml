@@ -1,0 +1,5 @@
+apiVersion: v2
+name: api
+description: The godough HTTP API and its probes.
+type: application
+version: 0.1.0

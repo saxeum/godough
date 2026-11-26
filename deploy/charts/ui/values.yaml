@@ -1,0 +1,36 @@
+# A digest, never a tag, for the same reason as the api: the digest in git is the
+# digest deployed.
+image:
+  repository: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# nginx-unprivileged listens on 8080 and the Service uses the same port, so there
+# is one number instead of a mapping. The edge terminates TLS and its target
+# group points here.
+containerPort: 8080
+
+# The probe is `/`, not `/healthz`: the container answers 404 there on purpose, so
+# that a health check can never be satisfied by index.html.
+probes:
+  path: /
+  initialDelaySeconds: 2
+  periodSeconds: 10
+  failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    memory: 64Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []

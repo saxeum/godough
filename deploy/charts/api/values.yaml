@@ -1,0 +1,68 @@
+# The image is a digest, never a tag. A tag can be moved under a running
+# release; a digest cannot, and the digest in git is then the digest deployed.
+image:
+  repository: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Both Secrets are created outside this chart — from Secrets Manager by
+# Terraform (#114). The chart references them and never assembles the DSN from
+# parts, so a password never exists in a values file or in Helm's release
+# history.
+databaseSecret:
+  name: godough-api
+  key: DATABASE_URL
+# The RDS CA bundle, mounted where the DSN's sslrootcert points.
+caSecret:
+  name: godough-rds-ca
+  key: global-bundle.pem
+  mountPath: /certs
+# Google sign-in is all-or-none: a partial set is a boot error, so these keys are
+# optional and a Secret without them runs with sign-in disabled.
+oauthSecret:
+  name: godough-api
+  clientIDKey: GOOGLE_CLIENT_ID
+  clientSecretKey: GOOGLE_CLIENT_SECRET
+  redirectURLKey: GOOGLE_REDIRECT_URL
+
+# The API's own listen address. The Service port matches it.
+addr: ":4000"
+
+# Exact origins, not a wildcard: the CSRF check compares against this list.
+trustedOrigins: ""
+
+log:
+  level: info
+  format: json
+
+# Liveness must not depend on the database: a pool that cannot connect would
+# otherwise restart a healthy process forever. Readiness is where the database
+# belongs, because that is what takes the pod out of the Service.
+probes:
+  livenessPath: /healthz
+  readinessPath: /readyz
+  initialDelaySeconds: 3
+  periodSeconds: 10
+  failureThreshold: 3
+
+# Must exceed preStop + the 20s request drain, or the connection is cut while a
+# request is still being written.
+terminationGracePeriodSeconds: 30
+preStopSleepSeconds: 5
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 192Mi
+
+service:
+  type: ClusterIP
+  port: 4000
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
