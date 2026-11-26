@@ -5,7 +5,8 @@ Checks the Terraform bootstrap resource in the live AWS account:
 - the state bucket exists and is readable;
 - all four S3 public-access blocks are enabled;
 - the bucket policy status is not public;
-- no ACL grant targets `AllUsers` or `AuthenticatedUsers`.
+- no ACL grant targets `AllUsers` or `AuthenticatedUsers`;
+- an anonymous HTTPS GET of the bucket root returns `403`, not a listing.
 
 It is a separate Go module so the application does not link the AWS SDK.
 

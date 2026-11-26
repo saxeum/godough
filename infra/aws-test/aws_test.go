@@ -6,9 +6,12 @@ package awstest
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -32,13 +35,9 @@ func TestStateBucketIsDeployedAndPrivate(t *testing.T) {
 		t.Fatalf("load AWS config: %v", err)
 	}
 
-	bucket := os.Getenv("STATE_BUCKET")
-	if bucket == "" {
-		account, err := accountID(ctx, cfg)
-		if err != nil {
-			t.Fatalf("derive bucket name: %v", err)
-		}
-		bucket = bucketPrefix + account
+	bucket, err := stateBucket(ctx, cfg)
+	if err != nil {
+		t.Fatalf("derive bucket name: %v", err)
 	}
 
 	s3Client := s3.NewFromConfig(cfg)
@@ -91,6 +90,57 @@ func TestStateBucketIsDeployedAndPrivate(t *testing.T) {
 	}
 
 	t.Logf("state bucket %s exists and is not public", bucket)
+}
+
+// An anonymous HTTPS GET of the bucket root must not list objects. The state
+// bucket is private, so S3 answers 403; a 200 here means the bucket is public
+// regardless of what the policy-status API says.
+func TestStateBucketIsNotPublicOverHTTPS(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region()))
+	if err != nil {
+		t.Fatalf("load AWS config: %v", err)
+	}
+	bucket, err := stateBucket(ctx, cfg)
+	if err != nil {
+		t.Fatalf("derive bucket name: %v", err)
+	}
+
+	endpoint := bucketURL(bucket, region())
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatalf("build request for %s: %v", endpoint, err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("anonymous GET %s: %v", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("anonymous GET %s = %d, want 403 for a private bucket", endpoint, resp.StatusCode)
+	}
+	t.Logf("anonymous GET %s = 403; bucket is not publicly listable", endpoint)
+}
+
+func stateBucket(ctx context.Context, cfg aws.Config) (string, error) {
+	if bucket := os.Getenv("STATE_BUCKET"); bucket != "" {
+		return bucket, nil
+	}
+	account, err := accountID(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	return bucketPrefix + account, nil
+}
+
+func bucketURL(bucket, region string) string {
+	if region == "us-east-1" {
+		return fmt.Sprintf("https://%s.s3.amazonaws.com/", bucket)
+	}
+	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/", bucket, region)
 }
 
 func region() string {
