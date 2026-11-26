@@ -10,7 +10,7 @@ what is easiest. The order inside each tier is the recommended execution order.
 
 | Order | Issue | Why now | Depends on |
 |---|---|---|---|
-| 1 | #34 — route `/healthz` and `/readyz` to the API | A probe that fails open makes every later LB measurement worthless | — |
+| 1 | #34 — keep `/healthz` and `/readyz` on the API pod; stop the SPA fallback answering them | The ALB target group and kubelet check the pod directly; the web tier must not answer a probe path with `200` | — |
 | 2 | #40 — cap `content` and align the 413 with nginx | Sets the per-row bound; the transport `413` JSON half already exists | — |
 | 3 | #12 — filter expired snippets out of the read paths | Small correctness fix; edits the same list query #35 will rewrite | — |
 | 4 | #35 — paginate `GET /api/snippet` | Bounds the list. Worst case is `page size × content cap` | #40, #12 |
