@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -123,6 +124,38 @@ func TestStateBucketIsNotPublicOverHTTPS(t *testing.T) {
 		t.Fatalf("anonymous GET %s = %d, want 403 for a private bucket", endpoint, resp.StatusCode)
 	}
 	t.Logf("anonymous GET %s = 403; bucket is not publicly listable", endpoint)
+}
+
+// publicBucketURL is a third-party AWS Open Data bucket with anonymous list
+// access. It is the positive control for the fetch: the same HTTP path that
+// must be 403 for our state bucket must be 200 somewhere.
+const publicBucketURL = "https://noaa-ghcn-pds.s3.amazonaws.com/"
+
+func TestPublicBucketFetchSucceeds(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicBucketURL, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", publicBucketURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200", publicBucketURL, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), "<ListBucketResult") {
+		t.Fatalf("GET %s returned 200 but not an S3 listing: %q", publicBucketURL, body)
+	}
+	t.Logf("anonymous GET %s = 200 listing; fetch positive control works", publicBucketURL)
 }
 
 func stateBucket(ctx context.Context, cfg aws.Config) (string, error) {
