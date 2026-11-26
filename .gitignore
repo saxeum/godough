@@ -36,7 +36,8 @@ crash.log
 # Local Docker login config used by make ecr-push
 .docker-ecr/
 
-# Kubeconfig for the private EKS endpoint, written by make eks-kubeconfig
+# Only used when EKS_KUBECONFIG points inside the repository; the default for
+# make eks-kubeconfig is ~/.kube/config.
 .kubeconfig*
 
 # Downloaded certificate bundles and keys
