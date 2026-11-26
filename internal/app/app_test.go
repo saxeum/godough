@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/saxeum/godough/internal/config"
+	"github.com/saxeum/godough/internal/repository/postgres"
 	"github.com/saxeum/godough/internal/transport/httpapi"
 )
 
@@ -270,5 +271,28 @@ func TestShutdownGraceExpiryIsNotAFailure(t *testing.T) {
 	}
 	if got := logs.String(); strings.Contains(got, "level=ERROR") {
 		t.Errorf("a spent grace period was logged at ERROR:\n%s", got)
+	}
+}
+
+func TestTheTimeoutLadderIsOrdered(t *testing.T) {
+	ladder := []struct {
+		name  string
+		value time.Duration
+	}{
+		{"postgres.StatementTimeout", postgres.StatementTimeout},
+		{"httpapi.RequestTimeout", httpapi.RequestTimeout},
+		{"shutdownGrace", shutdownGrace},
+		{"writeTimeout", writeTimeout},
+	}
+
+	for i := 1; i < len(ladder); i++ {
+		inner, outer := ladder[i-1], ladder[i]
+		if outer.value < inner.value {
+			t.Errorf("%s (%v) is shorter than %s (%v)", outer.name, outer.value, inner.name, inner.value)
+		}
+	}
+
+	if readHeaderTimeout > readTimeout {
+		t.Errorf("readHeaderTimeout (%v) exceeds readTimeout (%v)", readHeaderTimeout, readTimeout)
 	}
 }

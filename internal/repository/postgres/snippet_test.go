@@ -159,10 +159,10 @@ func TestSessionLimitsAreSetOnEveryConnection(t *testing.T) {
 			t.Fatalf("connection %d: show lock_timeout: %v", i, err)
 		}
 
-		if statement != StatementTimeout {
+		if statement != StatementTimeout.String() {
 			t.Errorf("connection %d: statement_timeout = %q, want %q", i, statement, StatementTimeout)
 		}
-		if lock != LockTimeout {
+		if lock != LockTimeout.String() {
 			t.Errorf("connection %d: lock_timeout = %q, want %q", i, lock, LockTimeout)
 		}
 	}
