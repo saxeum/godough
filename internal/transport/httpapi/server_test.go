@@ -294,18 +294,31 @@ func TestUnexpectedRepositoryErrorIsAJSON500(t *testing.T) {
 func TestUnknownRouteAndWrongMethod(t *testing.T) {
 	router := newRouter(t, newRepo())
 
-	if rec := do(t, router, http.MethodGet, "/api/snippets", ""); rec.Code != http.StatusNotFound {
-		t.Errorf("old list path: status = %d, want %d", rec.Code, http.StatusNotFound)
+	// The two responses the router writes itself. They are text/plain, which is
+	// the exception recorded in spec/openapi.yaml; asserting it here is what stops
+	// it becoming a different exception quietly.
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		want   int
+	}{
+		{name: "unknown api path", method: http.MethodGet, path: "/api/snippets", want: http.StatusNotFound},
+		{name: "wrong method", method: http.MethodPost, path: "/api/snippet/1", want: http.StatusMethodNotAllowed},
+		{name: "root", method: http.MethodGet, path: "/", want: http.StatusNotFound},
 	}
-	// 405, not the 415 the content-type guard would give a bodiless POST: the
-	// guard may not pre-empt routing. Recorded here because it is an ordering
-	// decision, not an accident.
-	if rec := do(t, router, http.MethodPost, "/api/snippet/1", ""); rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("wrong method: status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
-	}
-	// The API serves no files: the SPA is the web container's job.
-	if rec := do(t, router, http.MethodGet, "/", ""); rec.Code != http.StatusNotFound {
-		t.Errorf("root: status = %d, want %d", rec.Code, http.StatusNotFound)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := do(t, router, tt.method, tt.path, "")
+
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+				t.Errorf("Content-Type = %q, want text/plain — the recorded exception", got)
+			}
+		})
 	}
 }
 

@@ -5,6 +5,12 @@
  * A snippet manager. The API owns the `/api` prefix, so these paths are the
  * paths the load balancer and the ingress route: nothing rewrites them.
  *
+ * Every error response described below is JSON, with one exception: a `405` or
+ * an unknown path is answered by Go's `http.ServeMux` before any handler runs,
+ * with a `text/plain` body. The application does not shape it, because doing so
+ * means restating this routing table in code that can then disagree with it.
+ * Treat those bodies as opaque; the status code is the whole message.
+ *
  * OpenAPI spec version: 1
  */
 export interface Snippet {
