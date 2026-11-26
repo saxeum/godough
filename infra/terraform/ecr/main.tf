@@ -1,6 +1,9 @@
+data "aws_caller_identity" "current" {}
+
 locals {
   api_repository = "${var.project}-api"
   web_repository = "${var.project}-web"
+  state_bucket   = "${var.project}-terraform-state-${data.aws_caller_identity.current.account_id}"
 }
 
 resource "aws_ecr_repository" "api" {
@@ -136,8 +139,47 @@ data "aws_iam_policy_document" "github_publish" {
   }
 }
 
+data "aws_iam_policy_document" "github_aws_test" {
+  statement {
+    sid = "ReadStateBucketSecurityConfig"
+    actions = [
+      "s3:GetBucketAcl",
+      "s3:GetBucketLocation",
+      "s3:GetBucketPolicyStatus",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketWebsite",
+    ]
+    resources = ["arn:aws:s3:::${local.state_bucket}"]
+  }
+
+  statement {
+    sid = "ReadEcrMetadata"
+    actions = [
+      "ecr:DescribeRepositories",
+      "ecr:GetLifecyclePolicy",
+      "ecr:GetRepositoryPolicy",
+    ]
+    resources = [
+      aws_ecr_repository.api.arn,
+      aws_ecr_repository.web.arn,
+    ]
+  }
+
+  statement {
+    sid       = "ReadOwnRole"
+    actions   = ["iam:GetRole"]
+    resources = [aws_iam_role.github_publish.arn]
+  }
+}
+
 resource "aws_iam_role_policy" "github_publish" {
   name   = "${var.project}-github-publish"
   role   = aws_iam_role.github_publish.id
   policy = data.aws_iam_policy_document.github_publish.json
+}
+
+resource "aws_iam_role_policy" "github_aws_test" {
+  name   = "${var.project}-github-aws-test"
+  role   = aws_iam_role.github_publish.id
+  policy = data.aws_iam_policy_document.github_aws_test.json
 }

@@ -288,7 +288,10 @@ becomes wrong the moment it is fixed.
 ```
 make ecr-login ECR_REGISTRY=<registry>
 make ecr-push ECR_REGISTRY=<registry> TAG=<commit-sha>
+make ecr-pull-test ECR_REGISTRY=<registry> TAG=<commit-sha>
 ```
+
+`ecr-pull-test` pulls the pushed images back, starts the compose stack from them and runs `make e2e`.
 
 The CI `publish` job runs `make ecr-push` on `master` after `test` and `e2e`, authenticating through GitHub OIDC. The ECR stack is in `infra/terraform/ecr`.
 

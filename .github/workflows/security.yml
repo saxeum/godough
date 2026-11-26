@@ -94,3 +94,46 @@ jobs:
         with:
           sarif_file: trivy-web.sarif
           category: trivy-web
+
+  # Static policy on the Terraform itself: no AWS credentials, runs on every
+  # pull request, and catches a public bucket or a wide IAM trust before apply.
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
+
+      - name: Scan Terraform config
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          scan-type: config
+          scan-ref: infra/terraform
+          severity: HIGH,CRITICAL
+          skip-dirs: "**/.terraform"
+          exit-code: "1"
+
+  # Live invariants after apply and weekly: the account state, not just the
+  # Terraform source. OIDC only; no static AWS keys.
+  aws-test:
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-southeast-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0, runs on node24
+        with:
+          go-version-file: infra/aws-test/go.mod
+          cache: true
+
+      - uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Scan the live account
+        run: make aws-test

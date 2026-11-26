@@ -67,7 +67,7 @@ func TestStateBucketIsDeployedAndPrivate(t *testing.T) {
 	s := loadState(t)
 	client := s3.NewFromConfig(s.cfg)
 
-	if _, err := client.HeadBucket(s.ctx, &s3.HeadBucketInput{Bucket: &s.bucket}); err != nil {
+	if _, err := client.GetBucketLocation(s.ctx, &s3.GetBucketLocationInput{Bucket: &s.bucket}); err != nil {
 		t.Fatalf("state bucket %q is not deployed or not readable: %v", s.bucket, err)
 	}
 
@@ -155,6 +155,9 @@ func TestStateBucketIsNotPublicOverHTTPS(t *testing.T) {
 
 // TestPublicBucketFetchSucceeds is the positive control for the fetch itself.
 func TestPublicBucketFetchSucceeds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("network positive control: skipped by -short")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 

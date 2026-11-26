@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -207,6 +207,14 @@ ecr-build: ## [host] Build api and web images tagged for ECR
 ecr-push: ecr-login ecr-build ## [host] Build and push api and web images by commit SHA
 	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-api:$(TAG)"
 	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-web:$(TAG)"
+
+ecr-pull-test: ecr-login ## [host] Pull the ECR images and run compose plus e2e
+	@test -n "$(ECR_REGISTRY)" || { echo "ECR_REGISTRY is not set: <account>.dkr.ecr.<region>.amazonaws.com"; exit 1; }
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker pull "$(ECR_REGISTRY)/godough-api:$(TAG)"
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker pull "$(ECR_REGISTRY)/godough-web:$(TAG)"
+	ECR_REGISTRY="$(ECR_REGISTRY)" TAG="$(TAG)" docker compose -f docker-compose.yml -f docker-compose.ecr.yml up -d --wait --no-build
+	$(MAKE) db-migrate
+	$(MAKE) e2e
 
 # ---- docker -------------------------------------------------------------
 

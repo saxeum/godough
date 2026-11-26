@@ -1,0 +1,10 @@
+# Run the stack from images pulled out of ECR instead of building locally.
+#   ECR_REGISTRY=<registry> TAG=<sha> \
+#     docker compose -f docker-compose.yml -f docker-compose.ecr.yml up -d --no-build
+services:
+  api:
+    image: ${ECR_REGISTRY}/godough-api:${TAG}
+    build: !reset null
+  web:
+    image: ${ECR_REGISTRY}/godough-web:${TAG}
+    build: !reset null

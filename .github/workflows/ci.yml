@@ -146,3 +146,11 @@ jobs:
 
       - name: Build and push
         run: make ecr-push
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0, runs on node24
+        with:
+          go-version-file: infra/aws-test/go.mod
+          cache: true
+
+      - name: Live AWS invariants
+        run: make aws-test
