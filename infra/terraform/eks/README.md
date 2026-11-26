@@ -60,10 +60,13 @@ of the cluster endpoint, which still refuses an unauthenticated caller. And if
 the forward connects but `kubectl` hangs or resets, the thing to check is whether
 the cluster's security group allows 443 from the bastion's security group.
 
-A pipeline can open the same forward with its own OIDC credentials, which is an
-alternative to a runner inside the VPC for #115. Whether it should, and with what
-namespace-scoped RBAC rather than the publish role's cluster access, is #115's
-decision and not settled here.
+Deploys are applied from a laptop through this tunnel, not from CI. A pipeline can
+open the same forward with its own OIDC credentials, but giving the publish role
+cluster access is the mistake this arrangement exists to avoid, and a second role
+with namespace-scoped RBAC is machinery for a problem Argo CD will own: it reaches
+the private endpoint from inside the cluster and replaces the local apply. Until
+Argo CD lands, `kubectl apply` from a laptop is the deploy path, and the ordering
+in #115 (Job, wait for completion, then the Deployment) is a local sequence.
 
 ```
 terraform -chdir=infra/terraform/data output -raw bastion_instance_id
