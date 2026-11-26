@@ -14,9 +14,10 @@ data "terraform_remote_state" "data" {
 }
 
 locals {
-  cluster_name        = "${var.project}-staging"
-  private_subnet_ids  = data.terraform_remote_state.data.outputs.private_subnet_ids
-  node_security_group = data.terraform_remote_state.data.outputs.eks_node_security_group_id
+  cluster_name           = "${var.project}-staging"
+  private_subnet_ids     = data.terraform_remote_state.data.outputs.private_subnet_ids
+  node_security_group    = data.terraform_remote_state.data.outputs.eks_node_security_group_id
+  bastion_security_group = data.terraform_remote_state.data.outputs.bastion_security_group_id
 
   # The issuer URL is what IRSA trust policies are keyed on, so it is used twice:
   # once as the provider URL, once as the condition prefix.
@@ -164,6 +165,22 @@ resource "aws_eks_cluster" "this" {
   }
 
   depends_on = [aws_iam_role_policy_attachment.cluster]
+}
+
+# The endpoint is private, so the only way in from a laptop is the SSM port
+# forward through the bastion (make eks-tunnel). The security group EKS creates
+# for the cluster does not know about the bastion, and without this rule the
+# forward connects and kubectl then hangs on TLS with nothing to explain it.
+# 443 from that one group: not from the VPC, not from anywhere else.
+resource "aws_security_group_rule" "endpoint_from_bastion" {
+  type        = "ingress"
+  description = "Kubernetes API from the SSM bastion port forward"
+
+  security_group_id        = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = local.bastion_security_group
 }
 
 # IRSA. The cluster's issuer is trusted through this provider, and each workload

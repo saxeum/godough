@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -187,6 +187,8 @@ cover-raw: cover ## [both] The same run, unfiltered: generated code included
 
 AWS_REGION ?= ap-southeast-2
 TF_DATA := infra/terraform/data
+TF_EKS := infra/terraform/eks
+EKS_KUBECONFIG ?= $(CURDIR)/.kubeconfig-eks
 PSQL_ARGS ?=
 # Derived lazily, so `make help` and the non-ECR targets never call STS.
 ECR_REGISTRY ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null | sed 's/$$/.dkr.ecr.$(AWS_REGION).amazonaws.com/')
@@ -210,6 +212,22 @@ rds-psql: ## [host] psql to RDS through the running rds-tunnel
 	 password=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id "$$secret" --query SecretString --output text | jq -r .password); \
 	 endpoint=$$(terraform -chdir=$(TF_DATA) output -raw rds_endpoint | cut -d: -f1); \
 	 PGPASSWORD="$$password" psql "host=$$endpoint hostaddr=127.0.0.1 port=15432 dbname=godough user=godough sslmode=verify-full sslrootcert=global-bundle.pem" $(PSQL_ARGS)
+
+eks-tunnel: ## [host] Forward the private EKS API to localhost:6443 through SSM
+	@command -v session-manager-plugin >/dev/null || { echo "session-manager-plugin is not installed"; exit 1; }
+	@target=$$(terraform -chdir=$(TF_DATA) output -raw bastion_instance_id); \
+	 host=$$(terraform -chdir=$(TF_EKS) output -raw cluster_endpoint | sed 's|https://||'); \
+	 echo "forwarding $$host:443 to 127.0.0.1:6443 through $$target; leave this running, ^C to stop"; \
+	 aws ssm start-session --region $(AWS_REGION) --target "$$target" --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host="$$host",portNumber="443",localPortNumber="6443"
+
+eks-kubeconfig: ## [host] Write ./.kubeconfig-eks pointing at the tunnel above
+	@endpoint=$$(terraform -chdir=$(TF_EKS) output -raw cluster_endpoint); \
+	 host=$${endpoint#https://}; \
+	 KUBECONFIG=$(EKS_KUBECONFIG) aws eks update-kubeconfig --region $(AWS_REGION) --name "$$(terraform -chdir=$(TF_EKS) output -raw cluster_name)" --alias godough-staging >/dev/null; \
+	 cluster=$$(KUBECONFIG=$(EKS_KUBECONFIG) kubectl config view -o jsonpath='{.clusters[0].name}'); \
+	 KUBECONFIG=$(EKS_KUBECONFIG) kubectl config set-cluster "$$cluster" --server=https://127.0.0.1:6443 --tls-server-name="$$host" >/dev/null; \
+	 echo "$$cluster now dials 127.0.0.1:6443 as $$host"; \
+	 echo "export KUBECONFIG=$(EKS_KUBECONFIG)"
 
 aws-test: ## [host] Check the AWS state bucket exists and is not public
 	cd infra/aws-test && go test -count=1 -v ./...
