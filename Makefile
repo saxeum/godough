@@ -246,7 +246,7 @@ db-bootstrap: ## [docker] Create the application role and its grants (once per c
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < db/bootstrap.sql
 
 db-migrate: ## [both] Apply pending migrations/*.sql (reads DATABASE_URL_OWNER)
-	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; go run ./cmd/migrate -dir migrations
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; go run ./cmd/migrate
 
 db-test: db-up ## [both] Create, bootstrap and migrate the test database
 	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; \
@@ -257,7 +257,7 @@ db-test: db-up ## [both] Create, bootstrap and migrate the test database
 		docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d postgres -c "CREATE DATABASE snippet_test"; \
 	fi; \
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet_test -1 < db/bootstrap.sql; \
-	DATABASE_URL_OWNER="$$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate -dir migrations
+	DATABASE_URL_OWNER="$$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate
 
 stack-up: ## [docker] Build and start postgres, api, web and the LB (:8080)
 	docker compose up -d --wait --build

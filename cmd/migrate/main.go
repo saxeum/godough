@@ -1,14 +1,16 @@
-// Command migrate applies every pending file in a migrations directory, in
-// order, recording each in schema_migrations.
+// Command migrate applies every pending embedded migration, in order, recording
+// each in schema_migrations.
 //
 // It runs as the owner, because migrations create tables and the application
 // role owns nothing. The DSN comes from DATABASE_URL_OWNER rather than
 // DATABASE_URL so the two cannot be confused.
+//
+// There is no -dir flag: the SQL is embedded in this binary, so the thing that
+// runs also contains the thing that is applied.
 package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,19 +20,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/saxeum/godough/internal/migrate"
+	"github.com/saxeum/godough/migrations"
 )
 
 func main() {
-	dir := flag.String("dir", "migrations", "directory of NNNN_name.sql files")
-	flag.Parse()
-
-	if err := run(*dir); err != nil {
+	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(dir string) error {
+func run() error {
 	dsn := os.Getenv("DATABASE_URL_OWNER")
 	if dsn == "" {
 		return fmt.Errorf("DATABASE_URL_OWNER is not set: migrations run as the owner, not as the application role")
@@ -39,12 +39,12 @@ func run(dir string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	all, err := migrate.Discover(os.DirFS(dir), ".")
+	all, err := migrate.Discover(migrations.FS, ".")
 	if err != nil {
 		return err
 	}
 	if len(all) == 0 {
-		return fmt.Errorf("no .sql files in %s", dir)
+		return fmt.Errorf("no migrations were embedded; the build is broken")
 	}
 
 	pool, err := pgxpool.New(ctx, dsn)

@@ -132,7 +132,7 @@ failure still arrives as an `ApiError` with its per-field messages.
 
 ```
 cmd/web/                       main: config, then run
-cmd/migrate/                   applies pending migrations; ships in the same image
+cmd/migrate/                   applies the embedded migrations; ships in the same image
 internal/migrate/              discovery, ordering and the per-file transaction
 internal/config/               environment -> Config, validated at startup
 internal/domain/snippet/       entity, create-input, ErrNotFound, ValidationError
@@ -143,7 +143,7 @@ internal/app/                  wiring and the process lifecycle
 spec/openapi.yaml              the contract
 spec/oapi-codegen.yaml         its Go generator configuration
 ui/orval.config.ts             its TypeScript generator configuration
-migrations/                    plain SQL, applied by make db-migrate
+migrations/                    plain SQL, embedded in the migrator at build time
 db/bootstrap.sql               the application role and its grants, once per cluster
 nginx/lb.conf                  the routing rule above, locally
 scripts/e2e.sh                 the end-to-end checks
