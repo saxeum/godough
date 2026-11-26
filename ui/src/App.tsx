@@ -81,7 +81,10 @@ function SnippetView() {
 
   if (state.status === 'loading') return <Message>Loading…</Message>
   if (state.status === 'failed') {
-    const missing = state.error instanceof ApiError && state.error.status === 404
+    // 404 is a well-formed id that names nothing; 400 is an id that is not a
+    // number at all, which the API's router rejects before any handler runs.
+    // To someone reading the page both mean the same thing, so both say it.
+    const missing = state.error instanceof ApiError && (state.error.status === 404 || state.error.status === 400)
     return missing ? <Message>That snippet does not exist.</Message> : <Message>Could not load the snippet: {state.error.message}</Message>
   }
 

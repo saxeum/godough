@@ -113,10 +113,13 @@ these answer whether that is still true rather than trusting the reviewer:
 
 ```
 go list -deps ./internal/service/... | grep -c 'internal/transport'
-go list -deps ./internal/domain/...  | grep -cE 'internal/|github\.com'
+go list -f '{{range .Imports}}{{println .}}{{end}}' ./internal/domain/... | grep -c '\.'
 ```
 
-Both print `0`.
+Both print `0`. The second counts imports of the domain packages themselves: a
+dotted import path is either this module or a third party, and the domain is
+allowed neither. (`go list -deps` on its own is useless here — the standard
+library has packages called `internal/abi` and `internal/cpu`.)
 
 ## API
 
