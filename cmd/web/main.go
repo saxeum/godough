@@ -20,21 +20,28 @@ const bootTimeout = 10 * time.Second
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
+	// The signal context is built here and passed in, so the shutdown path can be
+	// driven by a test that cancels a context instead of signalling the test
+	// process. Sending a real signal to your own process is a test that can take
+	// the whole suite with it.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// run owns every resource, so its defers run on the way out.
-	if err := run(logger); err != nil {
+	if err := run(ctx, logger); err != nil {
 		logger.Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
+// run is everything main does once the signals are wired: read the environment,
+// reach the database, serve until ctx ends, and release. Its defers matter — the
+// pool is closed on the way out of here, after the server has drained.
+func run(ctx context.Context, logger *slog.Logger) error {
 	cfg, err := config.FromEnv()
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	bootCtx, bootDone := context.WithTimeout(ctx, bootTimeout)
 	application, err := app.New(bootCtx, cfg, logger)
