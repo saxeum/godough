@@ -59,10 +59,21 @@ jobs:
       - name: Install UI dependencies
         run: npm ci --prefix ui
 
+      # gofmt, staticcheck and oxlint. It runs before the image build, so a
+      # formatting or lint error fails in seconds rather than in a Docker layer.
+      - name: Lint
+        run: make lint
+
       # Regenerates and fails if the committed output changed. A hand-edited
       # generated file, or a spec change nobody regenerated, lands here.
       - name: Generated code is up to date
         run: make codegen-check
+
+      - name: UI tests
+        run: npm --prefix ui test
+
+      - name: UI build
+        run: npm --prefix ui run build
 
       - name: Create the test database
         run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE snippet_test'
@@ -74,8 +85,9 @@ jobs:
         run: DATABASE_URL_OWNER="$TEST_DATABASE_URL_OWNER" go run ./cmd/migrate -dir migrations
 
       # -count=1: the database is external state the test cache cannot see.
+      # -race: the auth work adds concurrency; find races before it lands.
       - name: Test
-        run: make test
+        run: make test-race
 
   # The stack as a user sees it: real images, real LB, real database. The
   # browser half is Chrome from the runner image (REQUIRE_BROWSER=1 makes its
