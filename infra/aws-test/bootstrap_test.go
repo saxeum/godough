@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 )
 
 const (
@@ -117,6 +118,23 @@ func TestStateBucketIsDeployedAndPrivate(t *testing.T) {
 	}
 
 	t.Logf("state bucket %s exists and is not public", s.bucket)
+}
+
+// TestStateBucketHasNoWebsiteConfiguration is the negative counterpart to the
+// public-listing checks: a bucket with website hosting configured can serve
+// objects without an S3 ListBucket grant.
+func TestStateBucketHasNoWebsiteConfiguration(t *testing.T) {
+	s := loadState(t)
+	client := s3.NewFromConfig(s.cfg)
+
+	_, err := client.GetBucketWebsite(s.ctx, &s3.GetBucketWebsiteInput{Bucket: &s.bucket})
+	if err == nil {
+		t.Fatalf("state bucket %q has website hosting configured", s.bucket)
+	}
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchWebsiteConfiguration" {
+		t.Fatalf("GetBucketWebsite(%q) = %v, want NoSuchWebsiteConfiguration", s.bucket, err)
+	}
 }
 
 // TestStateBucketIsNotPublicOverHTTPS is the external proof: an anonymous GET

@@ -2,9 +2,11 @@ package awstest
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
+	"github.com/aws/smithy-go"
 )
 
 const (
@@ -38,6 +40,24 @@ func TestECRRepositoriesAreImmutableAndScanned(t *testing.T) {
 		}
 		if repo.EncryptionConfiguration == nil || string(repo.EncryptionConfiguration.EncryptionType) != "AES256" {
 			t.Errorf("%s: encryption is not AES256", name)
+		}
+	}
+}
+
+// TestECRRepositoriesHaveNoRepositoryPolicy is the negative access check: a
+// repository policy is how an ECR repository becomes cross-account readable.
+func TestECRRepositoriesHaveNoRepositoryPolicy(t *testing.T) {
+	ctx := t.Context()
+	client := ecr.NewFromConfig(loadAWS(t))
+
+	for _, repository := range []string{apiRepository, webRepository} {
+		_, err := client.GetRepositoryPolicy(ctx, &ecr.GetRepositoryPolicyInput{RepositoryName: &repository})
+		if err == nil {
+			t.Fatalf("%s has a repository policy", repository)
+		}
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "RepositoryPolicyNotFoundException" {
+			t.Fatalf("%s: GetRepositoryPolicy = %v, want RepositoryPolicyNotFoundException", repository, err)
 		}
 	}
 }

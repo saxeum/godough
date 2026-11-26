@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.69.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.89.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.1
+	github.com/aws/smithy-go v1.28.10
 )
 
 require (
@@ -25,5 +26,4 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.8 // indirect
-	github.com/aws/smithy-go v1.28.10 // indirect
 )
