@@ -8,6 +8,5 @@ coverage.html
 docker-compose.yml
 nginx
 migrations
-docker-entrypoint-initdb.d
 ui
 Makefile

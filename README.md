@@ -56,7 +56,7 @@ the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
 
 - `SNIPPET_ADDR` — host:port the API listens on (`:4000`)
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
-  that owns nothing, created by `docker-entrypoint-initdb.d/01-app-role.sql`
+  that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
 - Migrations run as `godough`, the owner, over the container's trusted socket
 
 Both variables are required. There are no defaults: a missing one exits at
@@ -100,7 +100,7 @@ spec/openapi.yaml              the contract
 spec/oapi-codegen.yaml         its Go generator configuration
 ui/orval.config.ts             its TypeScript generator configuration
 migrations/                    plain SQL, applied by make db-migrate
-docker-entrypoint-initdb.d/    roles and grants, run once on an empty volume
+db/bootstrap.sql               the application role and its grants, once per cluster
 nginx/lb.conf                  the routing rule above, locally
 scripts/e2e.sh                 the end-to-end checks
 ui/                            React + Vite; ui/src/api/generated is generated too
@@ -138,6 +138,7 @@ JSON keys are the spec's, so they are camelCase: `id`, `title`, `content`,
 ## Tests
 
 ```
+make db-bootstrap   # the app role and its grants (Docker does it on an empty volume)
 make codegen-check  # host: fails if the generated code is stale
 make test-unit      # host, no database, no .env (-short)
 make test           # host against the postgres container; fails without it

@@ -41,7 +41,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover cover-raw vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate codegen codegen-go codegen-ts codegen-check
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover cover-raw vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate codegen codegen-go codegen-ts codegen-check
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -163,6 +163,9 @@ cover-raw: cover ## [both] The same run, unfiltered: generated code included
 
 db-up: ## [docker] Start Postgres only (:5432)
 	docker compose up -d --wait postgres
+
+db-bootstrap: ## [docker] Create the application role and its grants (once per cluster)
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < db/bootstrap.sql
 
 db-migrate: ## [docker] Apply migrations/*.sql to the dev database
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < migrations/0001_create_snippets.sql
