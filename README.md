@@ -13,8 +13,9 @@ make db-migrate     # apply migrations/*.sql
 make stack-up       # build and start postgres, api, web and the LB
 ```
 
-Then <http://localhost:8080> lists three seed snippets. `make down` stops the
-containers and keeps the database volume; `docker compose down -v` wipes it.
+Then <http://localhost:8080> serves the app, signed out until Google
+credentials are configured. `make down` stops the containers and keeps the
+database volume; `docker compose down -v` wipes it.
 
 Four containers, one routing rule — `/api/*` goes to the api container,
 everything else to the web container:
@@ -162,7 +163,9 @@ JSON keys are the spec's, so they are camelCase: `id`, `title`, `content`,
 | GET | `/readyz` | readiness: pings the database, `503` when it cannot |
 
 Every `/api/snippet` request requires a live `session` cookie; `POST` and
-`DELETE` also require an `Origin` in `TRUSTED_ORIGINS`. Sessions live in
+`DELETE` also require an `Origin` in `TRUSTED_ORIGINS`. Every snippet belongs to
+the session's user, every query is scoped to that owner, and another user's id
+is `404` rather than `403`. Sessions live in
 Postgres for seven days absolute, with no sliding renewal; the cookie is
 `HttpOnly; Secure; SameSite=Lax`, and the database stores only its SHA-256 hash.
 Expired rows are ignored by the lookup and removed at boot. The page shows a

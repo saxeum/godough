@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -38,18 +40,35 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
+func testOwner(t *testing.T, pool *pgxpool.Pool) int64 {
+	t.Helper()
+
+	var id int64
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users (sub, email, name) VALUES ($1, $2, $3) RETURNING id`,
+		fmt.Sprintf("snippet-owner-%d", time.Now().UnixNano()), "owner@example.com", "Owner",
+	).Scan(&id); err != nil {
+		t.Fatalf("insert owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id)
+	})
+	return id
+}
+
 // TestInsertGetDelete walks the repository's own round trip. It creates the row
 // it asserts on, so it does not depend on which seed rows the database happens
 // to hold.
 func TestInsertGetDelete(t *testing.T) {
-	repo := NewSnippetRepository(testPool(t))
+	pool := testPool(t)
+	repo := NewSnippetRepository(pool)
 	ctx := t.Context()
+	ownerID := testOwner(t, pool)
 
-	created, err := repo.Insert(ctx, snippet.New{Title: "repository round trip", Content: "first\nsecond", ExpiresInDays: 7})
+	created, err := repo.Insert(ctx, ownerID, snippet.New{Title: "repository round trip", Content: "first\nsecond", ExpiresInDays: 7})
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	t.Cleanup(func() { _ = repo.Delete(context.Background(), created.ID) })
+	t.Cleanup(func() { _ = repo.Delete(context.Background(), ownerID, created.ID) })
 
 	if created.ID < 1 {
 		t.Fatalf("created.ID = %d, want >= 1", created.ID)
@@ -61,7 +80,7 @@ func TestInsertGetDelete(t *testing.T) {
 		t.Errorf("Title = %q, want the inserted value", created.Title)
 	}
 
-	got, err := repo.Get(ctx, created.ID)
+	got, err := repo.Get(ctx, ownerID, created.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -69,35 +88,37 @@ func TestInsertGetDelete(t *testing.T) {
 		t.Errorf("Get returned %+v, want the inserted row %+v", got, created)
 	}
 
-	if err := repo.Delete(ctx, created.ID); err != nil {
+	if err := repo.Delete(ctx, ownerID, created.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	if _, err := repo.Get(ctx, created.ID); !errors.Is(err, snippet.ErrNotFound) {
+	if _, err := repo.Get(ctx, ownerID, created.ID); !errors.Is(err, snippet.ErrNotFound) {
 		t.Errorf("get after delete: err = %v, want ErrNotFound", err)
 	}
 	// The second delete matched nothing; that is not a failure, it is a 404.
-	if err := repo.Delete(ctx, created.ID); !errors.Is(err, snippet.ErrNotFound) {
+	if err := repo.Delete(ctx, ownerID, created.ID); !errors.Is(err, snippet.ErrNotFound) {
 		t.Errorf("second delete: err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestListIsNewestFirstAndIncludesTheNewRow(t *testing.T) {
-	repo := NewSnippetRepository(testPool(t))
+	pool := testPool(t)
+	repo := NewSnippetRepository(pool)
 	ctx := t.Context()
+	ownerID := testOwner(t, pool)
 
-	before, err := repo.List(ctx)
+	before, err := repo.List(ctx, ownerID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 
-	created, err := repo.Insert(ctx, snippet.New{Title: "list ordering probe", Content: "x", ExpiresInDays: 1})
+	created, err := repo.Insert(ctx, ownerID, snippet.New{Title: "list ordering probe", Content: "x", ExpiresInDays: 1})
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	t.Cleanup(func() { _ = repo.Delete(context.Background(), created.ID) })
+	t.Cleanup(func() { _ = repo.Delete(context.Background(), ownerID, created.ID) })
 
-	after, err := repo.List(ctx)
+	after, err := repo.List(ctx, ownerID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -120,14 +141,51 @@ func TestListIsNewestFirstAndIncludesTheNewRow(t *testing.T) {
 // TestListIsAnAllocatedSliceNotNil guards the JSON: a nil slice marshals to
 // null, and the contract says an empty list is [].
 func TestListIsAnAllocatedSliceNotNil(t *testing.T) {
-	repo := NewSnippetRepository(testPool(t))
+	pool := testPool(t)
+	repo := NewSnippetRepository(pool)
+	ownerID := testOwner(t, pool)
 
-	items, err := repo.List(t.Context())
+	items, err := repo.List(t.Context(), ownerID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if items == nil {
 		t.Error("List returned nil, which marshals to null; want an allocated slice")
+	}
+}
+
+func TestOwnershipScopesEveryQuery(t *testing.T) {
+	pool := testPool(t)
+	repo := NewSnippetRepository(pool)
+	ctx := t.Context()
+	ownerA := testOwner(t, pool)
+	ownerB := testOwner(t, pool)
+
+	created, err := repo.Insert(ctx, ownerA, snippet.New{Title: "owner A only", Content: "x", ExpiresInDays: 1})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	listB, err := repo.List(ctx, ownerB)
+	if err != nil {
+		t.Fatalf("list B: %v", err)
+	}
+	for _, item := range listB {
+		if item.ID == created.ID {
+			t.Fatalf("owner B can list owner A's row %d", created.ID)
+		}
+	}
+
+	if _, err := repo.Get(ctx, ownerB, created.ID); !errors.Is(err, snippet.ErrNotFound) {
+		t.Errorf("B get A's row: err = %v, want ErrNotFound", err)
+	}
+	if err := repo.Delete(ctx, ownerB, created.ID); !errors.Is(err, snippet.ErrNotFound) {
+		t.Errorf("B delete A's row: err = %v, want ErrNotFound", err)
+	}
+
+	// The second half is the one that matters: the row must still exist.
+	if _, err := repo.Get(ctx, ownerA, created.ID); err != nil {
+		t.Errorf("A get own row after B's delete: %v", err)
 	}
 }
 

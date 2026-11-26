@@ -24,14 +24,14 @@ func NewSnippetRepo(items ...snippet.Snippet) *SnippetRepo {
 	return &SnippetRepo{Items: items}
 }
 
-func (r *SnippetRepo) List(context.Context) ([]snippet.Snippet, error) {
+func (r *SnippetRepo) List(context.Context, int64) ([]snippet.Snippet, error) {
 	if r.Err != nil {
 		return nil, r.Err
 	}
 	return r.Items, nil
 }
 
-func (r *SnippetRepo) Get(_ context.Context, id int64) (snippet.Snippet, error) {
+func (r *SnippetRepo) Get(_ context.Context, _ int64, id int64) (snippet.Snippet, error) {
 	if r.Err != nil {
 		return snippet.Snippet{}, r.Err
 	}
@@ -42,7 +42,7 @@ func (r *SnippetRepo) Get(_ context.Context, id int64) (snippet.Snippet, error) 
 	return r.Items[idx], nil
 }
 
-func (r *SnippetRepo) Insert(_ context.Context, in snippet.New) (snippet.Snippet, error) {
+func (r *SnippetRepo) Insert(_ context.Context, _ int64, in snippet.New) (snippet.Snippet, error) {
 	if r.Err != nil {
 		return snippet.Snippet{}, r.Err
 	}
@@ -59,7 +59,7 @@ func (r *SnippetRepo) Insert(_ context.Context, in snippet.New) (snippet.Snippet
 	return created, nil
 }
 
-func (r *SnippetRepo) Delete(_ context.Context, id int64) error {
+func (r *SnippetRepo) Delete(_ context.Context, _ int64, id int64) error {
 	if r.Err != nil {
 		return r.Err
 	}

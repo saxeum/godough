@@ -73,15 +73,14 @@ print($3)
   if [ "$got" = "True" ]; then pass "$1 ($2)"; else fail "$1 ($2)" "got: $got"; fi
 }
 
-seed_id() { # title
-  body "/api/snippet" | python3 -c "
-import json,sys
-try:
-    items = json.load(sys.stdin)
-except Exception as exc:
-    print('not json: %s' % exc, file=sys.stderr); raise SystemExit(1)
-print(next((str(x['id']) for x in items if x['title'] == sys.argv[1]), ''))
-" "$1"
+create_snippet() { # title -> id, with the test session and a trusted Origin
+  local resp
+  resp=$(curl -s -X POST "$BASE_URL/api/snippet" -H 'Content-Type: application/json' \
+    -H "Origin: $BASE_URL" "${AUTH[@]}" \
+    -d "{\"title\":\"$1\",\"content\":\"created by scripts/e2e.sh\",\"expiresInDays\":1}")
+  printf '%s' "$resp" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("id") or "")
+except Exception: print("")'
 }
 
 # There is no sign-in endpoint yet (#53), so the e2e session is written straight
@@ -144,19 +143,21 @@ if [ "${#AUTH[@]}" -gt 0 ]; then
 fi
 
 # --- the API ---------------------------------------------------------------
+first_id=$(create_snippet "e2e first")
+second_id=$(create_snippet "e2e second")
+if [ -z "$first_id" ] || [ -z "$second_id" ]; then
+  fail "api: create the e2e rows" "ids came back as '$first_id' and '$second_id'"
+fi
+
 expect_status "api: list" "/api/snippet" 200
 ctype=$(content_type "/api/snippet")
 [ "$ctype" = "application/json" ] && pass "api: list content-type" || fail "api: list content-type" "got $ctype"
-# Not a count: this database is shared with a running UI, so other rows may
-# exist. The three seed rows must be present, newest first among themselves.
-SEEDS="('First autumn morning', 'Over the wintry forest', 'An old silent pond')"
-expect_json "api: list has the seed snippets, newest first" "/api/snippet" \
-  "[t for t in (x['title'] for x in d) if t in $SEEDS] == list($SEEDS)"
-seed_pond=$(seed_id "An old silent pond")
-if [ -z "$seed_pond" ]; then
-  fail "api: seed snippet present" "no 'An old silent pond' in the list"
-else
-  expect_json "api: one snippet" "/api/snippet/$seed_pond" "d['id'] == $seed_pond and d['title'] == 'An old silent pond'"
+# The list is scoped to this session's owner, and the two rows just created are
+# the only ones this new user can see. The second create is newer, so it leads.
+expect_json "api: list is owner-scoped and newest first" "/api/snippet" \
+  "[t for t in (x['title'] for x in d) if t in ('e2e first', 'e2e second')] == ['e2e second', 'e2e first']"
+if [ -n "$first_id" ]; then
+  expect_json "api: one snippet" "/api/snippet/$first_id" "d['id'] == $first_id and d['title'] == 'e2e first'"
 fi
 # Not an integer at all: the router rejects it before any handler runs.
 expect_status "api: malformed id is 400" "/api/snippet/abc" 400

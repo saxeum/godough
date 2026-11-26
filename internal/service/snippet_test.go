@@ -57,7 +57,7 @@ func TestCreateRejectsAndDoesNotWrite(t *testing.T) {
 	repo := &testutil.SnippetRepo{}
 	svc := NewSnippets(repo)
 
-	_, err := svc.Create(t.Context(), snippet.New{Title: "", Content: "c", ExpiresInDays: 7})
+	_, err := svc.Create(t.Context(), 1, snippet.New{Title: "", Content: "c", ExpiresInDays: 7})
 
 	var invalid *snippet.ValidationError
 	if !errors.As(err, &invalid) {
@@ -76,7 +76,7 @@ func TestCreatePassesInputThrough(t *testing.T) {
 	svc := NewSnippets(repo)
 
 	in := snippet.New{Title: "  padded  ", Content: "body", ExpiresInDays: 3}
-	if _, err := svc.Create(t.Context(), in); err != nil {
+	if _, err := svc.Create(t.Context(), 1, in); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -93,10 +93,10 @@ func TestGetAndDeleteRejectNonPositiveIDsWithoutTouchingTheRepository(t *testing
 	repo := testutil.NewSnippetRepo(snippet.Snippet{ID: 1})
 	svc := NewSnippets(repo)
 
-	if _, err := svc.Get(t.Context(), 0); !errors.Is(err, snippet.ErrNotFound) {
+	if _, err := svc.Get(t.Context(), 1, 0); !errors.Is(err, snippet.ErrNotFound) {
 		t.Errorf("Get(0) err = %v, want ErrNotFound", err)
 	}
-	if err := svc.Delete(t.Context(), -5); !errors.Is(err, snippet.ErrNotFound) {
+	if err := svc.Delete(t.Context(), 1, -5); !errors.Is(err, snippet.ErrNotFound) {
 		t.Errorf("Delete(-5) err = %v, want ErrNotFound", err)
 	}
 	if len(repo.Deleted) != 0 {
@@ -108,7 +108,7 @@ func TestRepositoryErrorsArePassedThrough(t *testing.T) {
 	sentinel := errors.New("database is on fire")
 	svc := NewSnippets(&testutil.SnippetRepo{Err: sentinel})
 
-	if _, err := svc.List(t.Context()); !errors.Is(err, sentinel) {
+	if _, err := svc.List(t.Context(), 1); !errors.Is(err, sentinel) {
 		t.Errorf("List err = %v, want the repository's error unchanged", err)
 	}
 }

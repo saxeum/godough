@@ -17,10 +17,10 @@ import (
 // the service can be exercised with a map and the Postgres package cannot leak a
 // query detail upward.
 type SnippetRepository interface {
-	List(ctx context.Context) ([]snippet.Snippet, error)
-	Get(ctx context.Context, id int64) (snippet.Snippet, error)
-	Insert(ctx context.Context, in snippet.New) (snippet.Snippet, error)
-	Delete(ctx context.Context, id int64) error
+	List(ctx context.Context, ownerID int64) ([]snippet.Snippet, error)
+	Get(ctx context.Context, ownerID, id int64) (snippet.Snippet, error)
+	Insert(ctx context.Context, ownerID int64, in snippet.New) (snippet.Snippet, error)
+	Delete(ctx context.Context, ownerID, id int64) error
 }
 
 // Snippets is the business layer for snippets.
@@ -32,34 +32,34 @@ func NewSnippets(repo SnippetRepository) *Snippets {
 	return &Snippets{repo: repo}
 }
 
-// List returns every stored snippet, newest first.
-func (s *Snippets) List(ctx context.Context) ([]snippet.Snippet, error) {
-	return s.repo.List(ctx)
+// List returns one owner's snippets, newest first.
+func (s *Snippets) List(ctx context.Context, ownerID int64) ([]snippet.Snippet, error) {
+	return s.repo.List(ctx, ownerID)
 }
 
-// Get returns one snippet, or snippet.ErrNotFound.
-func (s *Snippets) Get(ctx context.Context, id int64) (snippet.Snippet, error) {
+// Get returns one of the owner's snippets, or snippet.ErrNotFound.
+func (s *Snippets) Get(ctx context.Context, ownerID, id int64) (snippet.Snippet, error) {
 	if id < 1 {
 		return snippet.Snippet{}, snippet.ErrNotFound
 	}
-	return s.repo.Get(ctx, id)
+	return s.repo.Get(ctx, ownerID, id)
 }
 
-// Create validates the input and stores it, returning the row as the database
-// wrote it.
-func (s *Snippets) Create(ctx context.Context, in snippet.New) (snippet.Snippet, error) {
+// Create validates the input and stores it for the owner, returning the row as
+// the database wrote it.
+func (s *Snippets) Create(ctx context.Context, ownerID int64, in snippet.New) (snippet.Snippet, error) {
 	if bad := validate(in); len(bad) > 0 {
 		return snippet.Snippet{}, &snippet.ValidationError{Fields: bad}
 	}
-	return s.repo.Insert(ctx, in)
+	return s.repo.Insert(ctx, ownerID, in)
 }
 
-// Delete removes one snippet, or reports snippet.ErrNotFound.
-func (s *Snippets) Delete(ctx context.Context, id int64) error {
+// Delete removes one of the owner's snippets, or reports snippet.ErrNotFound.
+func (s *Snippets) Delete(ctx context.Context, ownerID, id int64) error {
 	if id < 1 {
 		return snippet.ErrNotFound
 	}
-	return s.repo.Delete(ctx, id)
+	return s.repo.Delete(ctx, ownerID, id)
 }
 
 // validate reports every bad field at once. The keys are the JSON names the

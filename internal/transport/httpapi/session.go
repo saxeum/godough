@@ -29,6 +29,11 @@ func sessionFromContext(ctx context.Context) (auth.Session, bool) {
 	return session, ok
 }
 
+func sessionUserID(ctx context.Context) (int64, bool) {
+	session, ok := sessionFromContext(ctx)
+	return session.UserID, ok
+}
+
 // requireSession protects the snippet routes and nothing else. It runs before
 // the origin check, so an anonymous write is 401 rather than a 403 that leaks
 // whether the route exists.

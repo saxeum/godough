@@ -51,13 +51,14 @@ func NewSnippetRepository(db *pgxpool.Pool) *SnippetRepository {
 	return &SnippetRepository{db: db}
 }
 
-// List returns every snippet, newest first. The id breaks the tie: created is
-// identical for rows written in the same transaction, which the seed rows are.
-func (r *SnippetRepository) List(ctx context.Context) ([]snippet.Snippet, error) {
+// List returns one owner's snippets, newest first. The id breaks the tie:
+// created is identical for rows written in the same transaction.
+func (r *SnippetRepository) List(ctx context.Context, ownerID int64) ([]snippet.Snippet, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, title, content, created, expires
 		FROM snippets
-		ORDER BY created DESC, id DESC`)
+		WHERE owner_id = $1
+		ORDER BY created DESC, id DESC`, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("query snippets: %w", err)
 	}
@@ -76,12 +77,13 @@ func (r *SnippetRepository) List(ctx context.Context) ([]snippet.Snippet, error)
 	return items, nil
 }
 
-// Get returns one snippet, or snippet.ErrNotFound.
-func (r *SnippetRepository) Get(ctx context.Context, id int64) (snippet.Snippet, error) {
+// Get returns one of the owner's snippets, or snippet.ErrNotFound. Another
+// owner's id is indistinguishable from a missing one.
+func (r *SnippetRepository) Get(ctx context.Context, ownerID, id int64) (snippet.Snippet, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, title, content, created, expires
 		FROM snippets
-		WHERE id = $1`, id)
+		WHERE id = $1 AND owner_id = $2`, id, ownerID)
 	if err != nil {
 		return snippet.Snippet{}, fmt.Errorf("query snippet %d: %w", id, err)
 	}
@@ -97,13 +99,13 @@ func (r *SnippetRepository) Get(ctx context.Context, id int64) (snippet.Snippet,
 	return scanned.toDomain(), nil
 }
 
-// Insert writes one snippet and returns the row as the database stored it, so
-// the caller never has to guess at created and expires.
-func (r *SnippetRepository) Insert(ctx context.Context, in snippet.New) (snippet.Snippet, error) {
+// Insert writes one snippet for the owner and returns the row as the database
+// stored it, so the caller never has to guess at created and expires.
+func (r *SnippetRepository) Insert(ctx context.Context, ownerID int64, in snippet.New) (snippet.Snippet, error) {
 	rows, err := r.db.Query(ctx, `
-		INSERT INTO snippets (title, content, created, expires)
-		VALUES ($1, $2, now(), now() + make_interval(days => $3))
-		RETURNING id, title, content, created, expires`, in.Title, in.Content, in.ExpiresInDays)
+		INSERT INTO snippets (owner_id, title, content, created, expires)
+		VALUES ($1, $2, $3, now(), now() + make_interval(days => $4))
+		RETURNING id, title, content, created, expires`, ownerID, in.Title, in.Content, in.ExpiresInDays)
 	if err != nil {
 		return snippet.Snippet{}, fmt.Errorf("insert snippet: %w", err)
 	}
@@ -116,10 +118,11 @@ func (r *SnippetRepository) Insert(ctx context.Context, in snippet.New) (snippet
 	return scanned.toDomain(), nil
 }
 
-// Delete removes one snippet, or reports snippet.ErrNotFound when it matched
-// nothing. The distinction matters: the second DELETE of one row is a 404.
-func (r *SnippetRepository) Delete(ctx context.Context, id int64) error {
-	tag, err := r.db.Exec(ctx, `DELETE FROM snippets WHERE id = $1`, id)
+// Delete removes one of the owner's snippets, or reports snippet.ErrNotFound
+// when it matched nothing. The second DELETE of one row is a 404, and so is
+// another owner's id.
+func (r *SnippetRepository) Delete(ctx context.Context, ownerID, id int64) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM snippets WHERE id = $1 AND owner_id = $2`, id, ownerID)
 	if err != nil {
 		return fmt.Errorf("delete snippet %d: %w", id, err)
 	}
