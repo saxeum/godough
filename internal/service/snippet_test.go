@@ -55,7 +55,7 @@ func TestValidate(t *testing.T) {
 
 func TestCreateRejectsAndDoesNotWrite(t *testing.T) {
 	repo := &testutil.SnippetRepo{}
-	svc := NewSnippetService(repo)
+	svc := NewSnippets(repo)
 
 	_, err := svc.Create(t.Context(), snippet.New{Title: "", Content: "c", ExpiresInDays: 7})
 
@@ -73,7 +73,7 @@ func TestCreateRejectsAndDoesNotWrite(t *testing.T) {
 
 func TestCreatePassesInputThrough(t *testing.T) {
 	repo := &testutil.SnippetRepo{}
-	svc := NewSnippetService(repo)
+	svc := NewSnippets(repo)
 
 	in := snippet.New{Title: "  padded  ", Content: "body", ExpiresInDays: 3}
 	if _, err := svc.Create(t.Context(), in); err != nil {
@@ -91,7 +91,7 @@ func TestCreatePassesInputThrough(t *testing.T) {
 
 func TestGetAndDeleteRejectNonPositiveIDsWithoutTouchingTheRepository(t *testing.T) {
 	repo := testutil.NewSnippetRepo(snippet.Snippet{ID: 1})
-	svc := NewSnippetService(repo)
+	svc := NewSnippets(repo)
 
 	if _, err := svc.Get(t.Context(), 0); !errors.Is(err, snippet.ErrNotFound) {
 		t.Errorf("Get(0) err = %v, want ErrNotFound", err)
@@ -106,7 +106,7 @@ func TestGetAndDeleteRejectNonPositiveIDsWithoutTouchingTheRepository(t *testing
 
 func TestRepositoryErrorsArePassedThrough(t *testing.T) {
 	sentinel := errors.New("database is on fire")
-	svc := NewSnippetService(&testutil.SnippetRepo{Err: sentinel})
+	svc := NewSnippets(&testutil.SnippetRepo{Err: sentinel})
 
 	if _, err := svc.List(t.Context()); !errors.Is(err, sentinel) {
 		t.Errorf("List err = %v, want the repository's error unchanged", err)

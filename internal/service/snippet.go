@@ -23,22 +23,22 @@ type SnippetRepository interface {
 	Delete(ctx context.Context, id int64) error
 }
 
-// SnippetService is the business layer for snippets.
-type SnippetService struct {
+// Snippets is the business layer for snippets.
+type Snippets struct {
 	repo SnippetRepository
 }
 
-func NewSnippetService(repo SnippetRepository) *SnippetService {
-	return &SnippetService{repo: repo}
+func NewSnippets(repo SnippetRepository) *Snippets {
+	return &Snippets{repo: repo}
 }
 
 // List returns every stored snippet, newest first.
-func (s *SnippetService) List(ctx context.Context) ([]snippet.Snippet, error) {
+func (s *Snippets) List(ctx context.Context) ([]snippet.Snippet, error) {
 	return s.repo.List(ctx)
 }
 
 // Get returns one snippet, or snippet.ErrNotFound.
-func (s *SnippetService) Get(ctx context.Context, id int64) (snippet.Snippet, error) {
+func (s *Snippets) Get(ctx context.Context, id int64) (snippet.Snippet, error) {
 	if id < 1 {
 		return snippet.Snippet{}, snippet.ErrNotFound
 	}
@@ -47,7 +47,7 @@ func (s *SnippetService) Get(ctx context.Context, id int64) (snippet.Snippet, er
 
 // Create validates the input and stores it, returning the row as the database
 // wrote it.
-func (s *SnippetService) Create(ctx context.Context, in snippet.New) (snippet.Snippet, error) {
+func (s *Snippets) Create(ctx context.Context, in snippet.New) (snippet.Snippet, error) {
 	if bad := validate(in); len(bad) > 0 {
 		return snippet.Snippet{}, &snippet.ValidationError{Fields: bad}
 	}
@@ -55,7 +55,7 @@ func (s *SnippetService) Create(ctx context.Context, in snippet.New) (snippet.Sn
 }
 
 // Delete removes one snippet, or reports snippet.ErrNotFound.
-func (s *SnippetService) Delete(ctx context.Context, id int64) error {
+func (s *Snippets) Delete(ctx context.Context, id int64) error {
 	if id < 1 {
 		return snippet.ErrNotFound
 	}

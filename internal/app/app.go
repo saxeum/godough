@@ -89,7 +89,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 	}
 
 	repo := postgres.NewSnippetRepository(db)
-	svc := service.NewSnippetService(repo)
+	svc := service.NewSnippets(repo)
 	handler := httpapi.NewServer(log, svc, db.Ping).Routes()
 
 	return &App{
