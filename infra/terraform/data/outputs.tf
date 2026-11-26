@@ -42,3 +42,13 @@ output "master_user_secret_arn" {
   description = "Secrets Manager secret holding the RDS master credentials."
   value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
 }
+
+output "bastion_instance_id" {
+  description = "SSM-only bastion instance."
+  value       = aws_instance.bastion.id
+}
+
+output "bastion_security_group_id" {
+  description = "Security group on the SSM bastion."
+  value       = aws_security_group.bastion.id
+}

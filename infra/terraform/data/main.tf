@@ -2,6 +2,26 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_ami" "al2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-kernel-*-arm64"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["arm64"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -103,6 +123,93 @@ resource "aws_security_group" "eks_nodes" {
   }
 }
 
+resource "aws_security_group" "bastion" {
+  name        = "${var.project}-ssm-bastion"
+  description = "SSM-only bastion; no inbound rules"
+  vpc_id      = aws_vpc.main.id
+
+  egress {
+    description = "SSM control plane"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    # Egress to the SSM control plane is why this is the only 0.0.0.0/0 rule.
+    # There is no inbound rule and no SSH. The alternative is three interface
+    # endpoints at roughly $21/month for a break-glass bastion.
+    #trivy:ignore:AVD-AWS-0104
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Postgres in the VPC for port forwarding"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  tags = {
+    Name = "${var.project}-ssm-bastion"
+  }
+}
+
+data "aws_iam_policy_document" "bastion_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "bastion" {
+  name               = "${var.project}-ssm-bastion"
+  assume_role_policy = data.aws_iam_policy_document.bastion_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "bastion_ssm" {
+  role       = aws_iam_role.bastion.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "bastion" {
+  name = "${var.project}-ssm-bastion"
+  role = aws_iam_role.bastion.name
+}
+
+resource "aws_instance" "bastion" {
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = "t4g.nano"
+  subnet_id                   = aws_subnet.public[0].id
+  vpc_security_group_ids      = [aws_security_group.bastion.id]
+  iam_instance_profile        = aws_iam_instance_profile.bastion.name
+  associate_public_ip_address = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
+  user_data = <<-EOF
+    #!/bin/bash
+    systemctl enable --now amazon-ssm-agent
+  EOF
+
+  tags = {
+    Name = "${var.project}-ssm-bastion"
+  }
+
+  depends_on = [aws_route_table_association.public]
+}
+
 resource "aws_security_group" "rds" {
   name        = "${var.project}-rds"
   description = "Postgres; only the EKS node security group may connect"
@@ -114,6 +221,14 @@ resource "aws_security_group" "rds" {
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.eks_nodes.id]
+  }
+
+  ingress {
+    description     = "Postgres from the SSM bastion"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
   }
 
   tags = {
