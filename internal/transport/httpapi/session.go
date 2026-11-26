@@ -18,6 +18,7 @@ const sessionCookieName = "session"
 type SessionService interface {
 	Authenticate(ctx context.Context, token string) (auth.Session, error)
 	Create(ctx context.Context, userID int64, ip, userAgent string) (string, auth.Session, error)
+	Revoke(ctx context.Context, token string) error
 }
 
 type sessionKey struct{}
@@ -95,6 +96,21 @@ func requireTrustedOrigin(allowed []string, log *slog.Logger, next http.Handler)
 		}
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+// clearSessionCookie removes the browser copy. The row is deleted separately;
+// this only stops the client presenting a dead token.
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 

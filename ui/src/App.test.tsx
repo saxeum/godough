@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import CreateSnippet from './CreateSnippet'
 import { ApiError, createSnippet, getSnippet, listSnippets } from './api'
+import { getSession, signOut } from './auth'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
@@ -18,9 +19,16 @@ vi.mock('./api', async () => {
   }
 })
 
+vi.mock('./auth', () => ({
+  getSession: vi.fn(),
+  signOut: vi.fn(),
+}))
+
 const mockedList = vi.mocked(listSnippets)
 const mockedGet = vi.mocked(getSnippet)
 const mockedCreate = vi.mocked(createSnippet)
+const mockedSession = vi.mocked(getSession)
+const mockedSignOut = vi.mocked(signOut)
 
 const snippet = {
   id: 7,
@@ -32,6 +40,7 @@ const snippet = {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  mockedSession.mockResolvedValue({ email: 'person@example.com', name: 'A Person' })
 })
 
 describe('App', () => {
@@ -46,6 +55,41 @@ describe('App', () => {
 
     expect(await screen.findByRole('link', { name: snippet.title })).toBeInTheDocument()
     expect(screen.getByText(snippet.content)).toBeInTheDocument()
+    expect(screen.getByText('A Person')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+  })
+
+  it('renders the signed-out state without loading the list', async () => {
+    mockedSession.mockResolvedValue(null)
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    )
+
+    const link = await screen.findByRole('link', { name: 'Continue with Google' })
+    expect(link).toHaveAttribute('href', '/api/auth/google')
+    expect(mockedList).not.toHaveBeenCalled()
+  })
+
+  it('signs out and returns to the signed-out state', async () => {
+    const user = userEvent.setup()
+    mockedSession
+      .mockResolvedValueOnce({ email: 'person@example.com', name: 'A Person' })
+      .mockResolvedValue(null)
+    mockedSignOut.mockResolvedValue(undefined)
+    mockedList.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(mockedSignOut).toHaveBeenCalledOnce()
+    expect(await screen.findByRole('link', { name: 'Continue with Google' })).toBeInTheDocument()
   })
 
   it('renders the signed-out state on a 401', async () => {

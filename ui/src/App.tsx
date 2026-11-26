@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, deleteSnippet, getSnippet, listSnippets, type Snippet } from './api'
+import { getSession, signOut } from './auth'
 import CreateSnippet from './CreateSnippet'
+import SignIn from './SignIn'
 
 type State<T> = { status: 'loading' } | { status: 'failed'; error: Error } | { status: 'ok'; data: T }
 
@@ -113,12 +115,43 @@ function SnippetView() {
 }
 
 function App() {
+  const [sessionKey, setSessionKey] = useState(0)
+  const [signOutError, setSignOutError] = useState('')
+  const state = useFetched(getSession, sessionKey)
+
+  async function handleSignOut() {
+    setSignOutError('')
+    try {
+      await signOut()
+      setSessionKey((key) => key + 1)
+    } catch (err) {
+      // A session that has already expired is signed out, not an error.
+      if (err instanceof ApiError && err.status === 401) {
+        setSessionKey((key) => key + 1)
+        return
+      }
+      setSignOutError('Could not sign out.')
+    }
+  }
+
+  if (state.status === 'loading') return <Message>Loading…</Message>
+  if (state.status === 'failed') return <Message>Could not check sign-in: {state.error.message}</Message>
+  if (!state.data) return <SignIn />
+
+  const session = state.data
   return (
     <>
       <header>
         <h1>
           <Link to="/">Snippetbox</Link>
         </h1>
+        <div className="account">
+          <span>{session.name || session.email}</span>
+          <button type="button" onClick={() => void handleSignOut()}>
+            Sign out
+          </button>
+          {signOutError && <span className="error">{signOutError}</span>}
+        </div>
       </header>
       <nav>
         <Link to="/">Home</Link>

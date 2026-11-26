@@ -174,9 +174,12 @@ signed-out state until the sign-in UI lands (#56).
 Sign-in is the server-side Google authorization-code flow: `/api/auth/google`
 redirects, `/api/auth/google/callback` exchanges the code and verifies the ID
 token. PKCE, state and nonce travel in short-lived HttpOnly cookies and are
-single-use. There is no Google JavaScript on the page. `/api/auth/*` is browser
-navigation, not part of the generated client contract, so it is deliberately
-outside `openapi.yaml`.
+single-use. There is no Google JavaScript on the page. `/api/auth/google` and
+the callback are browser navigation and deliberately outside `openapi.yaml`;
+`GET /api/auth/session` and `POST /api/auth/signout` are the UI's own control
+endpoints, also hand-written. The page uses `/api/auth/session` to decide
+between the signed-out prompt and the signed-in header, and sign-out deletes
+the database row before clearing the cookie.
 
 Any verified Google account may sign in; there is no allowlist. That is a
 deliberate platform default, not an inherited demo accident. A deployment that
