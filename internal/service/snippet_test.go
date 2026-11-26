@@ -1,58 +1,14 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/saxeum/godough/internal/domain/snippet"
+	"github.com/saxeum/godough/internal/testutil"
 )
-
-// fakeRepo is the whole point of declaring the repository interface in this
-// package: the service is exercised with a slice, and no database is involved.
-type fakeRepo struct {
-	items    []snippet.Snippet
-	err      error
-	inserted []snippet.New
-	deleted  []int64
-}
-
-func (f *fakeRepo) List(context.Context) ([]snippet.Snippet, error) {
-	return f.items, f.err
-}
-
-func (f *fakeRepo) Get(_ context.Context, id int64) (snippet.Snippet, error) {
-	if f.err != nil {
-		return snippet.Snippet{}, f.err
-	}
-	for _, item := range f.items {
-		if item.ID == id {
-			return item, nil
-		}
-	}
-	return snippet.Snippet{}, snippet.ErrNotFound
-}
-
-func (f *fakeRepo) Insert(_ context.Context, in snippet.New) (snippet.Snippet, error) {
-	if f.err != nil {
-		return snippet.Snippet{}, f.err
-	}
-	f.inserted = append(f.inserted, in)
-	return snippet.Snippet{ID: int64(len(f.inserted)), Title: in.Title, Content: in.Content}, nil
-}
-
-func (f *fakeRepo) Delete(_ context.Context, id int64) error {
-	if f.err != nil {
-		return f.err
-	}
-	if !slices.ContainsFunc(f.items, func(s snippet.Snippet) bool { return s.ID == id }) {
-		return snippet.ErrNotFound
-	}
-	f.deleted = append(f.deleted, id)
-	return nil
-}
 
 func TestValidate(t *testing.T) {
 	tests := []struct {
@@ -98,7 +54,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestCreateRejectsAndDoesNotWrite(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &testutil.SnippetRepo{}
 	svc := NewSnippetService(repo)
 
 	_, err := svc.Create(t.Context(), snippet.New{Title: "", Content: "c", ExpiresInDays: 7})
@@ -110,13 +66,13 @@ func TestCreateRejectsAndDoesNotWrite(t *testing.T) {
 	if _, ok := invalid.Fields["title"]; !ok {
 		t.Errorf("fields = %v, want a title entry", invalid.Fields)
 	}
-	if len(repo.inserted) != 0 {
-		t.Errorf("inserted %d rows for a rejected request, want 0", len(repo.inserted))
+	if len(repo.Inserted) != 0 {
+		t.Errorf("inserted %d rows for a rejected request, want 0", len(repo.Inserted))
 	}
 }
 
 func TestCreatePassesInputThrough(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &testutil.SnippetRepo{}
 	svc := NewSnippetService(repo)
 
 	in := snippet.New{Title: "  padded  ", Content: "body", ExpiresInDays: 3}
@@ -124,17 +80,17 @@ func TestCreatePassesInputThrough(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if len(repo.inserted) != 1 {
-		t.Fatalf("inserted %d rows, want 1", len(repo.inserted))
+	if len(repo.Inserted) != 1 {
+		t.Fatalf("inserted %d rows, want 1", len(repo.Inserted))
 	}
 	// Validation trims to decide emptiness; the stored value is what was sent.
-	if repo.inserted[0] != in {
-		t.Errorf("inserted %+v, want %+v", repo.inserted[0], in)
+	if repo.Inserted[0] != in {
+		t.Errorf("inserted %+v, want %+v", repo.Inserted[0], in)
 	}
 }
 
 func TestGetAndDeleteRejectNonPositiveIDsWithoutTouchingTheRepository(t *testing.T) {
-	repo := &fakeRepo{items: []snippet.Snippet{{ID: 1}}}
+	repo := testutil.NewSnippetRepo(snippet.Snippet{ID: 1})
 	svc := NewSnippetService(repo)
 
 	if _, err := svc.Get(t.Context(), 0); !errors.Is(err, snippet.ErrNotFound) {
@@ -143,14 +99,14 @@ func TestGetAndDeleteRejectNonPositiveIDsWithoutTouchingTheRepository(t *testing
 	if err := svc.Delete(t.Context(), -5); !errors.Is(err, snippet.ErrNotFound) {
 		t.Errorf("Delete(-5) err = %v, want ErrNotFound", err)
 	}
-	if len(repo.deleted) != 0 {
-		t.Errorf("deleted %v, want nothing", repo.deleted)
+	if len(repo.Deleted) != 0 {
+		t.Errorf("deleted %v, want nothing", repo.Deleted)
 	}
 }
 
 func TestRepositoryErrorsArePassedThrough(t *testing.T) {
 	sentinel := errors.New("database is on fire")
-	svc := NewSnippetService(&fakeRepo{err: sentinel})
+	svc := NewSnippetService(&testutil.SnippetRepo{Err: sentinel})
 
 	if _, err := svc.List(t.Context()); !errors.Is(err, sentinel) {
 		t.Errorf("List err = %v, want the repository's error unchanged", err)

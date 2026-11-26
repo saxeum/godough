@@ -16,66 +16,15 @@ import (
 
 	"github.com/saxeum/godough/internal/domain/snippet"
 	"github.com/saxeum/godough/internal/service"
+	"github.com/saxeum/godough/internal/testutil"
 	"github.com/saxeum/godough/internal/transport/httpapi"
 )
 
-// fakeRepo lets the transport be tested without a database, which is the
-// reason the service takes an interface rather than a pool.
-type fakeRepo struct {
-	items []snippet.Snippet
-	err   error
-	next  int64
-}
-
-func newFakeRepo() *fakeRepo {
-	return &fakeRepo{
-		items: []snippet.Snippet{
-			{ID: 2, Title: "newer", Content: "b"},
-			{ID: 1, Title: "older", Content: "a"},
-		},
-		next: 3,
-	}
-}
-
-func (f *fakeRepo) List(context.Context) ([]snippet.Snippet, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.items, nil
-}
-
-func (f *fakeRepo) Get(_ context.Context, id int64) (snippet.Snippet, error) {
-	if f.err != nil {
-		return snippet.Snippet{}, f.err
-	}
-	for _, item := range f.items {
-		if item.ID == id {
-			return item, nil
-		}
-	}
-	return snippet.Snippet{}, snippet.ErrNotFound
-}
-
-func (f *fakeRepo) Insert(_ context.Context, in snippet.New) (snippet.Snippet, error) {
-	if f.err != nil {
-		return snippet.Snippet{}, f.err
-	}
-	item := snippet.Snippet{ID: f.next, Title: in.Title, Content: in.Content}
-	f.next++
-	f.items = append([]snippet.Snippet{item}, f.items...)
-	return item, nil
-}
-
-func (f *fakeRepo) Delete(_ context.Context, id int64) error {
-	if f.err != nil {
-		return f.err
-	}
-	idx := slices.IndexFunc(f.items, func(s snippet.Snippet) bool { return s.ID == id })
-	if idx < 0 {
-		return snippet.ErrNotFound
-	}
-	f.items = slices.Delete(f.items, idx, idx+1)
-	return nil
+func newRepo() *testutil.SnippetRepo {
+	return testutil.NewSnippetRepo(
+		snippet.Snippet{ID: 2, Title: "newer", Content: "b"},
+		snippet.Snippet{ID: 1, Title: "older", Content: "a"},
+	)
 }
 
 func newRouter(t *testing.T, repo service.SnippetRepository) http.Handler {
@@ -140,7 +89,7 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 }
 
 func TestListSnippets(t *testing.T) {
-	rec := do(t, newRouter(t, newFakeRepo()), http.MethodGet, "/api/snippet", "")
+	rec := do(t, newRouter(t, newRepo()), http.MethodGet, "/api/snippet", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
@@ -169,7 +118,7 @@ func TestListSnippets(t *testing.T) {
 }
 
 func TestListSnippetsIsAnEmptyArrayNotNull(t *testing.T) {
-	rec := do(t, newRouter(t, &fakeRepo{}), http.MethodGet, "/api/snippet", "")
+	rec := do(t, newRouter(t, &testutil.SnippetRepo{}), http.MethodGet, "/api/snippet", "")
 
 	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
 		t.Errorf("empty list body = %q, want []", body)
@@ -177,7 +126,7 @@ func TestListSnippetsIsAnEmptyArrayNotNull(t *testing.T) {
 }
 
 func TestGetSnippet(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	rec := do(t, router, http.MethodGet, "/api/snippet/1", "")
 	if rec.Code != http.StatusOK {
@@ -200,7 +149,7 @@ func TestGetSnippet(t *testing.T) {
 // A well-formed integer that names no resource is a missing resource, not a
 // malformed request: identity starts at 1, so 0 and -1 are 404.
 func TestOutOfRangeIDIsNotFound(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	for _, path := range []string{"/api/snippet/0", "/api/snippet/-1"} {
 		t.Run(path, func(t *testing.T) {
@@ -212,7 +161,7 @@ func TestOutOfRangeIDIsNotFound(t *testing.T) {
 }
 
 func TestMalformedIDIsABadRequest(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	// Not an integer at all, so the router rejects it before any handler runs.
 	for _, path := range []string{"/api/snippet/abc", "/api/snippet/1.5", "/api/snippet/1x"} {
@@ -233,7 +182,7 @@ func TestMalformedIDIsABadRequest(t *testing.T) {
 }
 
 func TestCreateSnippet(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	rec := do(t, router, http.MethodPost, "/api/snippet",
 		`{"title":"a new haiku","content":"first line\nsecond line","expiresInDays":7}`)
@@ -273,7 +222,7 @@ func TestCreateSnippetRejects(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := do(t, newRouter(t, newFakeRepo()), http.MethodPost, "/api/snippet", tt.body)
+			rec := do(t, newRouter(t, newRepo()), http.MethodPost, "/api/snippet", tt.body)
 
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
@@ -298,7 +247,7 @@ func TestCreateSnippetRejects(t *testing.T) {
 }
 
 func TestDeleteSnippet(t *testing.T) {
-	repo := newFakeRepo()
+	repo := newRepo()
 	router := newRouter(t, repo)
 
 	rec := do(t, router, http.MethodDelete, "/api/snippet/1", "")
@@ -321,8 +270,8 @@ func TestDeleteSnippet(t *testing.T) {
 }
 
 func TestUnexpectedRepositoryErrorIsAJSON500(t *testing.T) {
-	repo := newFakeRepo()
-	repo.err = errors.New("connection refused")
+	repo := newRepo()
+	repo.Err = errors.New("connection refused")
 	router := newRouter(t, repo)
 
 	rec := do(t, router, http.MethodGet, "/api/snippet", "")
@@ -343,7 +292,7 @@ func TestUnexpectedRepositoryErrorIsAJSON500(t *testing.T) {
 }
 
 func TestUnknownRouteAndWrongMethod(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	if rec := do(t, router, http.MethodGet, "/api/snippets", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("old list path: status = %d, want %d", rec.Code, http.StatusNotFound)
@@ -361,7 +310,7 @@ func TestUnknownRouteAndWrongMethod(t *testing.T) {
 }
 
 func TestProbes(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	rec := do(t, router, http.MethodGet, "/healthz", "")
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
@@ -378,7 +327,7 @@ func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
 	ready := func(context.Context) error { return errors.New("pool closed") }
 	router := httpapi.NewServer(
 		slog.New(slog.DiscardHandler),
-		service.NewSnippetService(newFakeRepo()),
+		service.NewSnippetService(newRepo()),
 		ready,
 	).Routes()
 
@@ -397,7 +346,7 @@ func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
 // number, which is exactly why this was invisible: the request never reached the
 // pod in development.
 func TestBodyLimit(t *testing.T) {
-	router := newRouter(t, newFakeRepo())
+	router := newRouter(t, newRepo())
 
 	oversized := `{"title":"big","content":"` + strings.Repeat("a", 2<<20) + `","expiresInDays":7}`
 	rec := do(t, router, http.MethodPost, "/api/snippet", oversized)
@@ -436,7 +385,7 @@ func TestContentTypeIsRequired(t *testing.T) {
 			if tt.contentType != "" {
 				header.Set("Content-Type", tt.contentType)
 			}
-			rec := doWith(t, newRouter(t, newFakeRepo()), http.MethodPost, "/api/snippet", valid, header)
+			rec := doWith(t, newRouter(t, newRepo()), http.MethodPost, "/api/snippet", valid, header)
 
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
@@ -449,8 +398,8 @@ func TestContentTypeIsRequired(t *testing.T) {
 // cancellation comes back up through the layers as an error. It is not a fault,
 // and counting it as one makes the error rate measure browsers.
 func TestCancelledRequestIsNotAServerError(t *testing.T) {
-	repo := newFakeRepo()
-	repo.err = fmt.Errorf("query snippets: %w", context.Canceled)
+	repo := newRepo()
+	repo.Err = fmt.Errorf("query snippets: %w", context.Canceled)
 	router, logs := newRouterWithLog(t, repo)
 
 	rec := do(t, router, http.MethodGet, "/api/snippet", "")
