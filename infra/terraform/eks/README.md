@@ -60,13 +60,14 @@ of the cluster endpoint, which still refuses an unauthenticated caller. And if
 the forward connects but `kubectl` hangs or resets, the thing to check is whether
 the cluster's security group allows 443 from the bastion's security group.
 
-Deploys are applied from a laptop through this tunnel, not from CI. A pipeline can
-open the same forward with its own OIDC credentials, but giving the publish role
-cluster access is the mistake this arrangement exists to avoid, and a second role
-with namespace-scoped RBAC is machinery for a problem Argo CD will own: it reaches
-the private endpoint from inside the cluster and replaces the local apply. Until
-Argo CD lands, `kubectl apply` from a laptop is the deploy path, and the ordering
-in #115 (Job, wait for completion, then the Deployment) is a local sequence.
+Deploys do not go through a laptop. The charts are installed by Terraform (#125)
+and, after that, by Argo CD (#127), which runs inside the cluster and so reaches
+the private endpoint without a forward at all. This tunnel is for the smoke test
+(#124) and for debugging: `get`, `logs`, `describe`, `exec`.
+
+The open question is the Helm provider, not the human: if it runs from outside the
+VPC it needs this same forward, and #125 decides whether that is acceptable or
+whether the provider reaches the API from inside the cluster.
 
 Start the forward in its own terminal and leave it running:
 
