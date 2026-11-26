@@ -3,7 +3,11 @@
 Two stacks, in order:
 
 1. `bootstrap/` creates the S3 bucket that holds the state for everything else. Its own state is local and ignored by git; it cannot live in the bucket it creates.
-2. The AWS application stacks (ECR, EKS, RDS) use that bucket with S3 native locking (`use_lockfile = true`).
+2. The AWS application stacks (`data/` for the network and database, `ecr/` for repositories and the publish role, `eks/` for the cluster) use that bucket with S3 native locking (`use_lockfile = true`).
+
+Apply order: `bootstrap`, then `data`, then `ecr` and `eks`. `eks/` reads the
+VPC, subnet and node security group ids from `data/`'s state, so it cannot be
+first.
 
 ## Bootstrap
 
@@ -64,7 +68,9 @@ pulls both images back, starts the compose stack from them with `docker-compose.
 `data/` creates the staging VPC and database:
 
 - two public subnets for a future internet-facing ALB;
-- two private subnets for RDS and the future EKS node group;
+- two private subnets for RDS and the EKS node group;
+- one NAT gateway in the first public subnet, and the private route to it, for
+  image pulls and AWS APIs; single-AZ, which is documented in the stack;
 - an EKS node security group with no ingress, which the database trusts on 5432;
 - RDS Postgres `17.12`, `db.t4g.micro`, single-AZ, 20 GiB gp3, encrypted;
 - `rds.force_ssl=1`, CA `rds-ca-rsa4096-g1`, `publicly_accessible=false`;
@@ -90,3 +96,12 @@ from the EKS node or a job inside the VPC once the cluster exists.
 
 See [data/README.md](data/README.md) for the SSM tunnel, CA bundle and `psql`
 commands.
+
+## EKS
+
+`eks/` creates one control plane, one Graviton managed node group, the VPC CNI,
+kube-proxy, CoreDNS and EBS CSI add-ons, the IRSA OIDC provider, and a KMS key for
+Secret encryption. The API endpoint is private, so `kubectl` goes through the
+same SSM bastion as `psql`.
+
+See [eks/README.md](eks/README.md) for the apply order, the tunnel and the cost.

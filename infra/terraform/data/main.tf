@@ -103,6 +103,40 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
+# One NAT gateway in the first public subnet, for the EKS nodes: image pulls from
+# ECR, the STS and EC2 APIs the node and the volume controller call, and the
+# cluster endpoint. The alternative is five interface endpoints at about the same
+# monthly cost, and this is one address to reason about.
+#
+# Single-AZ is the trade: if public-1 or its NAT fails, running pods keep running
+# and RDS is untouched, but nothing new can pull an image or reach the API. A NAT
+# per AZ would be about another $33/month to remove that, which staging does not
+# need yet.
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${var.project}-nat"
+  }
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  tags = {
+    Name = "${var.project}-nat"
+  }
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+resource "aws_route" "private_nat" {
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main.id
+}
+
 # This is the security group the future EKS managed node group will use. The
 # database accepts 5432 from this group and from nowhere else.
 resource "aws_security_group" "eks_nodes" {
@@ -111,11 +145,20 @@ resource "aws_security_group" "eks_nodes" {
   vpc_id      = aws_vpc.main.id
 
   egress {
-    description = "VPC traffic; add NAT or endpoints before EKS needs the internet"
+    description = "VPC traffic: RDS, CoreDNS and the cluster endpoint ENIs"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "ECR, STS, EC2 and the EKS API, through the NAT gateway"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    #trivy:ignore:AVD-AWS-0104
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = {
