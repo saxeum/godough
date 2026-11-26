@@ -65,6 +65,14 @@ func (s *Server) Routes() http.Handler {
 				s.log.Info("request abandoned by the client", "method", r.Method, "uri", r.URL.RequestURI())
 				return
 			}
+			// A request that ran out of its own deadline is the server's failure,
+			// not the client's, so it stays a 500 — with the distinction in the
+			// log, because "deadline exceeded" alone does not say which deadline.
+			if errors.Is(err, context.DeadlineExceeded) {
+				s.log.Error("request deadline exceeded", "err", err, "timeout", RequestTimeout, "method", r.Method, "uri", r.URL.RequestURI())
+				writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+				return
+			}
 			s.log.Error("server error", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
 			writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
 		},
@@ -76,8 +84,9 @@ func (s *Server) Routes() http.Handler {
 	})
 
 	// Outside, not inside: the generated handler reads the body before any of its
-	// own middleware sees the request.
-	return bodyGuards(api)
+	// own middleware sees the request. Outermost first, so a panic anywhere below
+	// is recovered, and the deadline covers everything that follows.
+	return recoverer(s.log, requestDeadline(RequestTimeout, bodyGuards(api)))
 }
 
 // healthz says the process is alive. It must not touch the database: a database
