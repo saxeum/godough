@@ -44,6 +44,27 @@ The API endpoint is private, like the database. `aws eks update-kubeconfig` alon
 gets you a kubeconfig that cannot connect from a laptop; the tunnel is the same
 SSM path `make rds-tunnel` uses for psql.
 
+### Why the same instance as RDS, and what it must not become
+
+It is one host, and it stays a pipe. Nothing is installed on it, it holds no
+kubeconfig, and the instance role is not added to the cluster's access entries,
+so the forward carries bytes and nothing else. Authentication happens as *your*
+identity against the cluster's access entries, which is the point: CloudTrail and
+the EKS audit log name the person, not an instance role that everybody shares.
+The alternative — `kubectl` on the box, or an access entry for its instance
+profile — would turn "database break-glass" into "cluster admin shell", and
+after #114/#115 the cluster holds the database credentials.
+
+Two consequences worth knowing. The tunnel does not grant access: it exposes 443
+of the cluster endpoint, which still refuses an unauthenticated caller. And if
+the forward connects but `kubectl` hangs or resets, the thing to check is whether
+the cluster's security group allows 443 from the bastion's security group.
+
+A pipeline can open the same forward with its own OIDC credentials, which is an
+alternative to a runner inside the VPC for #115. Whether it should, and with what
+namespace-scoped RBAC rather than the publish role's cluster access, is #115's
+decision and not settled here.
+
 ```
 terraform -chdir=infra/terraform/data output -raw bastion_instance_id
 ```
