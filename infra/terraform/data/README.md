@@ -15,7 +15,23 @@ terraform apply tfplan
 
 The bastion is SSM Session Manager only: no inbound rules, no SSH. You need the
 [AWS Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-and valid AWS credentials. Run the commands below from this directory.
+and valid AWS credentials.
+
+From the repository root, use the two Make targets:
+
+```
+make rds-tunnel
+```
+
+Then in another terminal:
+
+```
+make rds-psql
+```
+
+`rds-psql` accepts `PSQL_ARGS`, for example `make rds-psql PSQL_ARGS='-c "select 1"'`.
+
+The equivalent manual commands, run from this directory, are below.
 
 Download the RDS CA bundle once. It is gitignored.
 
