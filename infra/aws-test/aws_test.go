@@ -23,101 +23,104 @@ import (
 const (
 	defaultRegion = "ap-southeast-2"
 	bucketPrefix  = "godough-terraform-state-"
+
+	// publicBucketURL is a third-party AWS Open Data bucket with anonymous
+	// list access. It is the positive control: the same GET that must be 403
+	// on our state bucket must be 200 somewhere.
+	publicBucketURL = "https://noaa-ghcn-pds.s3.amazonaws.com/"
 )
+
+type state struct {
+	ctx    context.Context
+	cfg    aws.Config
+	bucket string
+	region string
+}
+
+func loadState(t *testing.T) state {
+	t.Helper()
+
+	ctx := t.Context()
+	region := awsRegion()
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		t.Fatalf("load AWS config: %v", err)
+	}
+	bucket, err := stateBucket(ctx, cfg)
+	if err != nil {
+		t.Fatalf("derive bucket name: %v", err)
+	}
+	return state{ctx: ctx, cfg: cfg, bucket: bucket, region: region}
+}
 
 // TestStateBucketIsDeployedAndPrivate is the acceptance check for #102. It
 // proves the bucket exists, has all four public-access blocks, has a
 // non-public policy status, and has no public ACL grants.
 func TestStateBucketIsDeployedAndPrivate(t *testing.T) {
-	ctx := context.Background()
+	s := loadState(t)
+	client := s3.NewFromConfig(s.cfg)
 
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region()))
-	if err != nil {
-		t.Fatalf("load AWS config: %v", err)
+	if _, err := client.HeadBucket(s.ctx, &s3.HeadBucketInput{Bucket: &s.bucket}); err != nil {
+		t.Fatalf("state bucket %q is not deployed or not readable: %v", s.bucket, err)
 	}
 
-	bucket, err := stateBucket(ctx, cfg)
+	access, err := client.GetPublicAccessBlock(s.ctx, &s3.GetPublicAccessBlockInput{Bucket: &s.bucket})
 	if err != nil {
-		t.Fatalf("derive bucket name: %v", err)
-	}
-
-	s3Client := s3.NewFromConfig(cfg)
-
-	if _, err := s3Client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &bucket}); err != nil {
-		t.Fatalf("state bucket %q is not deployed or not readable: %v", bucket, err)
-	}
-
-	access, err := s3Client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{Bucket: &bucket})
-	if err != nil {
-		t.Fatalf("get public access block for %q: %v", bucket, err)
+		t.Fatalf("get public access block for %q: %v", s.bucket, err)
 	}
 	if access.PublicAccessBlockConfiguration == nil {
-		t.Fatalf("state bucket %q has no public access block", bucket)
+		t.Fatalf("state bucket %q has no public access block", s.bucket)
 	}
 	pab := access.PublicAccessBlockConfiguration
-	for name, value := range map[string]*bool{
-		"BlockPublicAcls":       pab.BlockPublicAcls,
-		"IgnorePublicAcls":      pab.IgnorePublicAcls,
-		"BlockPublicPolicy":     pab.BlockPublicPolicy,
-		"RestrictPublicBuckets": pab.RestrictPublicBuckets,
+	for _, block := range []struct {
+		name  string
+		value *bool
+	}{
+		{"BlockPublicAcls", pab.BlockPublicAcls},
+		{"IgnorePublicAcls", pab.IgnorePublicAcls},
+		{"BlockPublicPolicy", pab.BlockPublicPolicy},
+		{"RestrictPublicBuckets", pab.RestrictPublicBuckets},
 	} {
-		if value == nil || !*value {
-			t.Errorf("state bucket %q: %s is not true", bucket, name)
+		if block.value == nil || !*block.value {
+			t.Errorf("state bucket %q: %s is not true", s.bucket, block.name)
 		}
 	}
 
-	policyStatus, err := s3Client.GetBucketPolicyStatus(ctx, &s3.GetBucketPolicyStatusInput{Bucket: &bucket})
+	policyStatus, err := client.GetBucketPolicyStatus(s.ctx, &s3.GetBucketPolicyStatusInput{Bucket: &s.bucket})
 	if err != nil {
-		t.Fatalf("get policy status for %q: %v", bucket, err)
+		t.Fatalf("get policy status for %q: %v", s.bucket, err)
 	}
 	if policyStatus.PolicyStatus == nil || policyStatus.PolicyStatus.IsPublic == nil {
-		t.Fatalf("state bucket %q has no policy status", bucket)
+		t.Fatalf("state bucket %q has no policy status", s.bucket)
 	}
 	if *policyStatus.PolicyStatus.IsPublic {
-		t.Errorf("state bucket %q has a public bucket policy", bucket)
+		t.Errorf("state bucket %q has a public bucket policy", s.bucket)
 	}
 
-	acl, err := s3Client.GetBucketAcl(ctx, &s3.GetBucketAclInput{Bucket: &bucket})
+	acl, err := client.GetBucketAcl(s.ctx, &s3.GetBucketAclInput{Bucket: &s.bucket})
 	if err != nil {
-		t.Fatalf("get ACL for %q: %v", bucket, err)
+		t.Fatalf("get ACL for %q: %v", s.bucket, err)
 	}
 	for _, grant := range acl.Grants {
 		if grant.Grantee == nil || grant.Grantee.URI == nil {
 			continue
 		}
 		if isPublicGroup(*grant.Grantee.URI) {
-			t.Errorf("state bucket %q grants access to public group %s", bucket, *grant.Grantee.URI)
+			t.Errorf("state bucket %q grants access to public group %s", s.bucket, *grant.Grantee.URI)
 		}
 	}
 
-	t.Logf("state bucket %s exists and is not public", bucket)
+	t.Logf("state bucket %s exists and is not public", s.bucket)
 }
 
-// An anonymous HTTPS GET of the bucket root must not list objects. The state
-// bucket is private, so S3 answers 403; a 200 here means the bucket is public
-// regardless of what the policy-status API says.
+// TestStateBucketIsNotPublicOverHTTPS is the external proof: an anonymous GET
+// of the bucket root must not list objects. A 200 here means the bucket is
+// public regardless of what the policy-status API says.
 func TestStateBucketIsNotPublicOverHTTPS(t *testing.T) {
-	ctx := context.Background()
+	s := loadState(t)
+	endpoint := bucketURL(s.bucket, s.region)
 
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region()))
-	if err != nil {
-		t.Fatalf("load AWS config: %v", err)
-	}
-	bucket, err := stateBucket(ctx, cfg)
-	if err != nil {
-		t.Fatalf("derive bucket name: %v", err)
-	}
-
-	endpoint := bucketURL(bucket, region())
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		t.Fatalf("build request for %s: %v", endpoint, err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("anonymous GET %s: %v", endpoint, err)
-	}
+	resp := fetch(t, s.ctx, endpoint)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusForbidden {
@@ -126,23 +129,12 @@ func TestStateBucketIsNotPublicOverHTTPS(t *testing.T) {
 	t.Logf("anonymous GET %s = 403; bucket is not publicly listable", endpoint)
 }
 
-// publicBucketURL is a third-party AWS Open Data bucket with anonymous list
-// access. It is the positive control for the fetch: the same HTTP path that
-// must be 403 for our state bucket must be 200 somewhere.
-const publicBucketURL = "https://noaa-ghcn-pds.s3.amazonaws.com/"
-
+// TestPublicBucketFetchSucceeds is the positive control for the fetch itself.
 func TestPublicBucketFetchSucceeds(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicBucketURL, nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET %s: %v", publicBucketURL, err)
-	}
+	resp := fetch(t, ctx, publicBucketURL)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -156,6 +148,20 @@ func TestPublicBucketFetchSucceeds(t *testing.T) {
 		t.Fatalf("GET %s returned 200 but not an S3 listing: %q", publicBucketURL, body)
 	}
 	t.Logf("anonymous GET %s = 200 listing; fetch positive control works", publicBucketURL)
+}
+
+func fetch(t *testing.T, ctx context.Context, url string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build request for %s: %v", url, err)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	return resp
 }
 
 func stateBucket(ctx context.Context, cfg aws.Config) (string, error) {
@@ -176,7 +182,7 @@ func bucketURL(bucket, region string) string {
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/", bucket, region)
 }
 
-func region() string {
+func awsRegion() string {
 	if region := os.Getenv("AWS_REGION"); region != "" {
 		return region
 	}
