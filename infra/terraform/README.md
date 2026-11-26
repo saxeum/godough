@@ -45,13 +45,16 @@ Outputs:
 ## Building and pushing
 
 ```
-ECR_REGISTRY=<registry> TAG=$(git rev-parse HEAD) make ecr-push
+make ecr-push
 ```
+
+`ECR_REGISTRY` is derived from STS when unset. `TAG` overrides both; otherwise
+`ecr-push` uses the current commit and `ecr-pull-test` uses `origin/master`.
 
 `make ecr-build` and `make ecr-login` are separate steps. The tag is the commit SHA; there is no `latest`. The CI `publish` job runs the same `make ecr-push` after `test` and `e2e`, only on `master`, using OIDC and the role above.
 
 ```
-ECR_REGISTRY=<registry> TAG=<sha> make ecr-pull-test
+make ecr-pull-test
 ```
 
 pulls both images back, starts the compose stack from them with `docker-compose.ecr.yml`, and runs `make e2e`.

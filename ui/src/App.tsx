@@ -143,7 +143,7 @@ function App() {
     <>
       <header>
         <h1>
-          <Link to="/">Snippetbox</Link>
+          <Link to="/">Snippetbox-Beta</Link>
         </h1>
         <div className="account">
           <span>{session.name || session.email}</span>

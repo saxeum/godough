@@ -186,9 +186,15 @@ cover-raw: cover ## [both] The same run, unfiltered: generated code included
 # ---- infrastructure -----------------------------------------------------
 
 AWS_REGION ?= ap-southeast-2
-ECR_REGISTRY ?=
+# Derived lazily, so `make help` and the non-ECR targets never call STS.
+ECR_REGISTRY ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null | sed 's/$$/.dkr.ecr.$(AWS_REGION).amazonaws.com/')
 ECR_DOCKER_CONFIG ?= $(CURDIR)/.docker-ecr
-TAG ?= $(shell git rev-parse HEAD)
+# TAG overrides both. Push defaults to HEAD; pull defaults to the last published
+# master commit, so a pull-test on a feature branch does not ask ECR for an
+# image that only exists in the working tree.
+TAG ?=
+PUSH_TAG ?= $(if $(TAG),$(TAG),$(shell git rev-parse HEAD))
+PULL_TAG ?= $(if $(TAG),$(TAG),$(shell git rev-parse origin/master 2>/dev/null || git rev-parse HEAD))
 
 aws-test: ## [host] Check the AWS state bucket exists and is not public
 	cd infra/aws-test && go test -count=1 -v ./...
@@ -201,18 +207,18 @@ ecr-login: ## [host] Log Docker in to the ECR registry
 ecr-build: ## [host] Build api and web images tagged for ECR
 	@test -n "$(ECR_REGISTRY)" || { echo "ECR_REGISTRY is not set: <account>.dkr.ecr.<region>.amazonaws.com"; exit 1; }
 	@mkdir -p "$(ECR_DOCKER_CONFIG)"
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build -t "$(ECR_REGISTRY)/godough-api:$(TAG)" .
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build -t "$(ECR_REGISTRY)/godough-web:$(TAG)" ./ui
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build -t "$(ECR_REGISTRY)/godough-api:$(PUSH_TAG)" .
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker build -t "$(ECR_REGISTRY)/godough-web:$(PUSH_TAG)" ./ui
 
 ecr-push: ecr-login ecr-build ## [host] Build and push api and web images by commit SHA
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-api:$(TAG)"
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-web:$(TAG)"
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-api:$(PUSH_TAG)"
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker push "$(ECR_REGISTRY)/godough-web:$(PUSH_TAG)"
 
 ecr-pull-test: ecr-login ## [host] Pull the ECR images and run compose plus e2e
 	@test -n "$(ECR_REGISTRY)" || { echo "ECR_REGISTRY is not set: <account>.dkr.ecr.<region>.amazonaws.com"; exit 1; }
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker pull "$(ECR_REGISTRY)/godough-api:$(TAG)"
-	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker pull "$(ECR_REGISTRY)/godough-web:$(TAG)"
-	ECR_REGISTRY="$(ECR_REGISTRY)" TAG="$(TAG)" docker compose -f docker-compose.yml -f docker-compose.ecr.yml up -d --wait --no-build
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker pull "$(ECR_REGISTRY)/godough-api:$(PULL_TAG)"
+	DOCKER_CONFIG="$(ECR_DOCKER_CONFIG)" docker pull "$(ECR_REGISTRY)/godough-web:$(PULL_TAG)"
+	ECR_REGISTRY="$(ECR_REGISTRY)" TAG="$(PULL_TAG)" docker compose -f docker-compose.yml -f docker-compose.ecr.yml up -d --wait --no-build
 	$(MAKE) db-migrate
 	$(MAKE) e2e
 
