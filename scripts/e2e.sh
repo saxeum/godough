@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 #
 # End-to-end checks against a running stack. Nothing here starts or stops a
-# container: it asserts what a browser would see at the LB.
+# container: it asserts what a browser would see at the LB, and it checks the
+# API's probes on the API's own port.
 #
-#   BASE_URL=http://localhost:8080 scripts/e2e.sh
+#   BASE_URL=http://localhost:8080 API_URL=http://localhost:4000 scripts/e2e.sh
+#
+# The probes are deliberately not part of the public route table. In production
+# the ALB target group checks the api pod directly; the LB and the ingress never
+# route /healthz or /readyz.
 #
 # REQUIRE_BROWSER=1 turns a missing headless browser into a failure instead of
 # a skip, so CI cannot quietly drop the rendering half.
 set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+API_URL="${API_URL:-http://localhost:4000}"
 REQUIRE_BROWSER="${REQUIRE_BROWSER:-0}"
 fails=0
 checks=0
@@ -27,6 +33,12 @@ expect_status() { # name path want [method]
   if [ "$got" = "$3" ]; then pass "$1 ($2 -> $got)"; else fail "$1 ($2 ${4:-GET})" "status $got, want $3"; fi
 }
 
+expect_api_body() { # name path want
+  local got
+  got=$(curl -s "$API_URL$2")
+  if [ "$got" = "$3" ]; then pass "$1 ($API_URL$2)"; else fail "$1 ($API_URL$2)" "body $(printf '%q' "$got"), want $3"; fi
+}
+
 expect_json() { # name path python-expression-on-d
   local got
   got=$(body "$2" | python3 -c "
@@ -41,6 +53,16 @@ print($3)
 }
 
 echo "# $BASE_URL"
+echo "# api $API_URL"
+
+# --- the probes: pod-level, not public -------------------------------------
+# Direct to the API, because that is what the ALB target group and the kubelet
+# do. The LB assertions below prove the web fallback is not standing in for a
+# probe: a 200 there would be a health check that passes while the API is dead.
+expect_api_body "api: healthz direct" "/healthz" "ok"
+expect_api_body "api: readyz direct" "/readyz" "ok"
+expect_status "lb: /healthz is not a client route" "/healthz" 404
+expect_status "lb: /readyz is not a client route" "/readyz" 404
 
 # --- the API ---------------------------------------------------------------
 expect_status "api: list" "/api/snippet" 200
