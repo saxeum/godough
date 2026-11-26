@@ -1,0 +1,170 @@
+openapi: 3.0.3
+info:
+  title: godough API
+  version: "1"
+  description: |
+    A snippet manager. The API owns the `/api` prefix, so these paths are the
+    paths the load balancer and the ingress route: nothing rewrites them.
+servers:
+  - url: /
+paths:
+  /api/snippet:
+    get:
+      operationId: listSnippets
+      summary: Every snippet, newest first.
+      responses:
+        "200":
+          description: The snippets, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Snippet"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createSnippet
+      summary: Create one snippet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSnippetRequest"
+      responses:
+        "201":
+          description: Created.
+          headers:
+            Location:
+              description: Path of the created snippet.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snippet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/snippet/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SnippetId"
+    get:
+      operationId: getSnippet
+      summary: One snippet.
+      responses:
+        "200":
+          description: The snippet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snippet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteSnippet
+      summary: Remove one snippet.
+      responses:
+        "204":
+          description: Deleted. There is nothing to say back.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  parameters:
+    SnippetId:
+      name: id
+      in: path
+      required: true
+      description: |
+        Ids start at 1. A value below that is a well-formed integer that names
+        no resource, so it is 404 rather than 400; a value that is not an
+        integer at all is 400, and the router answers that before any handler
+        runs.
+      schema:
+        type: integer
+        format: int64
+  responses:
+    BadRequest:
+      description: The request could not be decoded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: No snippet with that id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationError:
+      description: One or more fields were rejected. Every bad field is reported at once.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationError"
+    InternalError:
+      description: The server failed. The body never names the cause.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Snippet:
+      type: object
+      required: [id, title, content, created, expires]
+      properties:
+        id:
+          type: integer
+          format: int64
+          x-go-name: ID
+        title:
+          type: string
+        content:
+          type: string
+        created:
+          type: string
+          format: date-time
+        expires:
+          type: string
+          format: date-time
+    CreateSnippetRequest:
+      type: object
+      required: [title, content, expiresInDays]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        content:
+          type: string
+          minLength: 1
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    ValidationError:
+      type: object
+      required: [errors]
+      properties:
+        errors:
+          type: object
+          additionalProperties:
+            type: string

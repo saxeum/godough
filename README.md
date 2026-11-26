@@ -62,7 +62,66 @@ the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
 Both variables are required. There are no defaults: a missing one exits at
 startup with its name.
 
+## Contract
+
+`spec/openapi.yaml` is the only description of the wire format. Both languages
+are generated from it and neither generated file is edited by hand:
+
+```
+make codegen        # both
+make codegen-go     # internal/transport/httpapi/openapi.gen.go, via oapi-codegen
+make codegen-ts     # ui/src/api/generated, via orval
+make codegen-check  # regenerate, then fail if the tree changed
+```
+
+`codegen-check` is a required CI check, so a spec change that nobody regenerated
+lands there rather than in production. The output is committed because the web
+image builds from `ui/` alone and cannot see a spec at the repository root — and
+because a drift gate needs a committed copy to diff against.
+
+The Go side is generated with `strict-server` and `std-http-server`, which is
+what makes the layering real: the controller implements an interface whose
+methods take typed request objects and return typed response objects, so a
+documented status code that no branch produces does not compile. The TypeScript
+side generates one function per operation over a custom `fetch` mutator, so a
+failure still arrives as an `ApiError` with its per-field messages.
+
+## Layout
+
+```
+cmd/web/                       main: config, then run
+internal/config/               environment -> Config, validated at startup
+internal/domain/snippet/       entity, create-input, ErrNotFound, ValidationError
+internal/service/              the rules; declares the repository interface it uses
+internal/repository/postgres/  the only package that knows SQL
+internal/transport/httpapi/    generated contract + controller + probes + routes
+internal/app/                  wiring and the process lifecycle
+spec/openapi.yaml              the contract
+spec/oapi-codegen.yaml         its Go generator configuration
+ui/orval.config.ts             its TypeScript generator configuration
+migrations/                    plain SQL, applied by make db-migrate
+docker-entrypoint-initdb.d/    roles and grants, run once on an empty volume
+nginx/lb.conf                  the routing rule above, locally
+scripts/e2e.sh                 the end-to-end checks
+ui/                            React + Vite; ui/src/api/generated is generated too
+Dockerfile                     api image: static binary, distroless, no UI in it
+```
+
+Dependencies point one way: `transport -> service -> domain`, and
+`repository -> domain`. Nothing in `service` or `domain` imports `transport`, and
+these answer whether that is still true rather than trusting the reviewer:
+
+```
+go list -deps ./internal/service/... | grep -c 'internal/transport'
+go list -deps ./internal/domain/...  | grep -cE 'internal/|github\.com'
+```
+
+Both print `0`.
+
 ## API
+
+JSON keys are the spec's, so they are camelCase: `id`, `title`, `content`,
+`created`, `expires`, and `expiresInDays` on the way in.
 
 | method | path | |
 |---|---|---|
@@ -76,6 +135,7 @@ startup with its name.
 ## Tests
 
 ```
+make codegen-check  # host: fails if the generated code is stale
 make test-unit      # host, no database, no .env (-short)
 make test           # host against the postgres container; fails without it
 make e2e            # against the running stack on :8080
@@ -126,18 +186,6 @@ make symbols        # function symbols per module in the binary, largest first
 `make symbols` needs an unstripped binary. The image is built with
 `-ldflags="-s -w"`, so `go tool nm` finds no symbol table there — which is why
 `make vuln-binary` exists: it reads the pclntab instead.
-
-## Layout
-
-```
-cmd/web/                     the API: routes, handlers, db, health
-migrations/                  plain SQL, applied by make db-migrate
-docker-entrypoint-initdb.d/  roles and grants, run once on an empty volume
-nginx/lb.conf                the routing rule above, locally
-scripts/e2e.sh               the end-to-end checks
-ui/                          React + Vite; ui/nginx.conf serves the built SPA
-Dockerfile                   api image: static binary, distroless, no UI in it
-```
 
 ## Conventions
 

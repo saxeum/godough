@@ -24,8 +24,8 @@ export default function CreateSnippet() {
     setFailed('')
 
     try {
-      const created = await createSnippet({ Title: title, Content: content, ExpiresInDays: days })
-      navigate(`/snippet/${created.ID}`)
+      const created = await createSnippet({ title, content, expiresInDays: days })
+      navigate(`/snippet/${created.id}`)
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setFieldErrors(err.fieldErrors)

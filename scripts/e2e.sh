@@ -50,10 +50,11 @@ ctype=$(content_type "/api/snippet")
 # exist. The three seed rows must be present, newest first among themselves.
 SEEDS="('First autumn morning', 'Over the wintry forest', 'An old silent pond')"
 expect_json "api: list has the seed snippets, newest first" "/api/snippet" \
-  "[t for t in (x['Title'] for x in d) if t in $SEEDS] == list($SEEDS)"
-expect_json "api: one snippet" "/api/snippet/1" "d['ID'] == 1 and d['Title'] == 'An old silent pond'"
-expect_status "api: malformed id is 404" "/api/snippet/abc" 404
-expect_json "api: malformed id is a JSON error" "/api/snippet/abc" "d.get('error') == 'Not Found'"
+  "[t for t in (x['title'] for x in d) if t in $SEEDS] == list($SEEDS)"
+expect_json "api: one snippet" "/api/snippet/1" "d['id'] == 1 and d['title'] == 'An old silent pond'"
+# Not an integer at all: the router rejects it before any handler runs.
+expect_status "api: malformed id is 400" "/api/snippet/abc" 400
+expect_json "api: malformed id is a JSON error" "/api/snippet/abc" "d.get('error') == 'Bad Request'"
 expect_status "api: missing id is 404" "/api/snippet/999" 404
 expect_status "api: wrong method is 405" "/api/snippet/1" 405 POST
 
@@ -127,9 +128,9 @@ cleanup_probe() {
 trap cleanup_probe EXIT
 
 resp=$(curl -s -X POST "$BASE_URL/api/snippet" -H 'Content-Type: application/json' \
-  -d "{\"Title\":\"e2e probe $$\",\"Content\":\"created by scripts/e2e.sh\",\"ExpiresInDays\":1}")
+  -d "{\"title\":\"e2e probe $$\",\"content\":\"created by scripts/e2e.sh\",\"expiresInDays\":1}")
 probe_id=$(printf '%s' "$resp" | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("ID") or "")
+try: print(json.load(sys.stdin).get("id") or "")
 except Exception: print("")' 2>/dev/null)
 
 if [ -n "$probe_id" ]; then
@@ -140,7 +141,7 @@ if [ -n "$probe_id" ]; then
   probe_alive=0
   expect_status "api: the deleted snippet is gone" "/api/snippet/$probe_id" 404
   expect_json "api: the probe is gone from the list" "/api/snippet" \
-    "not any(x['Title'] == 'e2e probe $$' for x in d)"
+    "not any(x['title'] == 'e2e probe $$' for x in d)"
 else
   fail "api: create a snippet" "no ID came back: $resp"
 fi

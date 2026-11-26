@@ -1,0 +1,16 @@
+# Generates the Go server contract from spec/openapi.yaml. Run from the
+# repository root: `make codegen-go`, which passes this file to oapi-codegen.
+#
+# strict-server is the point: the controller implements an interface whose
+# methods take typed request objects and return typed response objects, so a
+# documented status code that no branch produces is a compile error rather than
+# a missing case. std-http-server mounts on http.ServeMux, so there is no
+# router dependency.
+package: httpapi
+output: internal/transport/httpapi/openapi.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  skip-prune: false
