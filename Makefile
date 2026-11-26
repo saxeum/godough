@@ -167,8 +167,8 @@ db-up: ## [docker] Start Postgres only (:5432)
 db-bootstrap: ## [docker] Create the application role and its grants (once per cluster)
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < db/bootstrap.sql
 
-db-migrate: ## [docker] Apply migrations/*.sql to the dev database
-	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < migrations/0001_create_snippets.sql
+db-migrate: ## [both] Apply pending migrations/*.sql (reads DATABASE_URL_OWNER)
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; go run ./cmd/migrate -dir migrations
 
 stack-up: ## [docker] Build and start postgres, api, web and the LB (:8080)
 	docker compose up -d --wait --build
