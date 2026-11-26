@@ -151,8 +151,11 @@ JSON keys are the spec's, so they are camelCase: `id`, `title`, `content`,
 make db-bootstrap   # the app role and its grants (Docker does it on an empty volume)
 make db-test        # create, bootstrap and migrate snippet_test
 make codegen-check  # host: fails if the generated code is stale
+make lint           # host: gofmt, staticcheck and oxlint; warnings fail
 make test-unit      # host, no database, no .env (-short)
 make test           # host against the test database; fails without TEST_DATABASE_URL
+make test-race      # host: all tests with the race detector
+npm --prefix ui test # Vitest component tests
 make e2e            # against the running stack on :8080
 make vuln           # govulncheck: vulnerabilities reachable from this code
 make vuln-images    # trivy: fixable HIGH/CRITICAL in both images
@@ -162,6 +165,11 @@ make vuln-images    # trivy: fixable HIGH/CRITICAL in both images
 application-role bootstrap and the migrations. It is safe to re-run. `make test`
 clears `snippets` with the `psql` client before the run, so a failed run cannot
 poison the next one, and it never writes to the development database.
+
+`make lint` runs `gofmt -l` (failing on output, not fixing it), a pinned
+`staticcheck`, and `oxlint --deny-warnings`. `make test-race` runs the same
+database tests under the race detector. The UI tests run under Vitest with
+`jsdom` and Testing Library.
 
 `make vuln` runs a pinned `govulncheck` via `go run`, so there is nothing to
 install and `go.mod` is untouched; `make vuln-binary` runs the same scan against

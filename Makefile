@@ -4,6 +4,7 @@ LOAD_ENV := set -a; if [ -f .env ]; then . ./.env; fi; set +a
 # Pinned, and run with `go run` so nothing has to be installed and go.mod is
 # not touched. The vulnerability database updates itself.
 VULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.10.0
+STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@v0.8.2
 
 # Trivy through docker: no install, and the same binary locally and in CI.
 TRIVY := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 image --scanners vuln --quiet
@@ -41,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover cover-raw vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -87,6 +88,11 @@ ui-build: ## [host] Build the React UI into ui/dist
 
 vet: ## [host] Run go vet
 	go vet ./...
+
+lint: ## [host] gofmt, staticcheck and oxlint
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt found unformatted files:"; echo "$$out"; exit 1; fi
+	$(STATICCHECK) ./...
+	npm --prefix ui run lint
 
 deps: ## [host] Modules linked into bin/godough, from its buildinfo
 	@test -x $(BINARY) || $(MAKE) --no-print-directory -s build
@@ -161,6 +167,9 @@ test-db-reset: ## [both] Clear the test database before a run
 
 test: test-db-reset ## [both] All tests against the test database (needs make db-test)
 	$(LOAD_ENV); go test -count=1 -v -cover ./...
+
+test-race: test-db-reset ## [both] All tests with the race detector
+	$(LOAD_ENV); go test -race -count=1 -v ./...
 
 cover: test-db-reset ## [both] HTML coverage report: cross-package counted, generated code excluded
 	$(LOAD_ENV); go test -count=1 -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
