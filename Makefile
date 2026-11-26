@@ -188,7 +188,10 @@ cover-raw: cover ## [both] The same run, unfiltered: generated code included
 AWS_REGION ?= ap-southeast-2
 TF_DATA := infra/terraform/data
 TF_EKS := infra/terraform/eks
-EKS_KUBECONFIG ?= $(CURDIR)/.kubeconfig-eks
+# The standard kubeconfig, because `aws eks update-kubeconfig` merges a context
+# rather than replacing the file: kubectl then works with nothing exported. Set
+# EKS_KUBECONFIG to a path to keep it out of ~/.kube entirely.
+EKS_KUBECONFIG ?= $(HOME)/.kube/config
 PSQL_ARGS ?=
 # Derived lazily, so `make help` and the non-ECR targets never call STS.
 ECR_REGISTRY ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null | sed 's/$$/.dkr.ecr.$(AWS_REGION).amazonaws.com/')
@@ -240,14 +243,24 @@ eks-tunnel: ## [host] Forward the private EKS API to localhost:6443 through SSM
 	 echo "forwarding $$host:443 to 127.0.0.1:6443 through $$target; leave this running, ^C to stop"; \
 	 aws ssm start-session --region $(AWS_REGION) --target "$$target" --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host="$$host",portNumber="443",localPortNumber="6443"
 
-eks-kubeconfig: ## [host] Write ./.kubeconfig-eks pointing at the tunnel above
+eks-kubeconfig: ## [host] Point kubectl at the tunnel above, as context godough-staging
 	@endpoint=$$(terraform -chdir=$(TF_EKS) output -raw cluster_endpoint); \
 	 host=$${endpoint#https://}; \
-	 KUBECONFIG=$(EKS_KUBECONFIG) aws eks update-kubeconfig --region $(AWS_REGION) --name "$$(terraform -chdir=$(TF_EKS) output -raw cluster_name)" --alias godough-staging >/dev/null; \
-	 cluster=$$(KUBECONFIG=$(EKS_KUBECONFIG) kubectl config view -o jsonpath='{.clusters[0].name}'); \
-	 KUBECONFIG=$(EKS_KUBECONFIG) kubectl config set-cluster "$$cluster" --server=https://127.0.0.1:6443 --tls-server-name="$$host" >/dev/null; \
-	 echo "$$cluster now dials 127.0.0.1:6443 as $$host"; \
-	 echo "export KUBECONFIG=$(EKS_KUBECONFIG)"
+	 aws eks update-kubeconfig --region $(AWS_REGION) --kubeconfig $(EKS_KUBECONFIG) \
+	   --name "$$(terraform -chdir=$(TF_EKS) output -raw cluster_name)" --alias godough-staging >/dev/null || exit 1; \
+	 cluster=$$(kubectl config view --kubeconfig $(EKS_KUBECONFIG) \
+	   -o jsonpath="{.contexts[?(@.name=='godough-staging')].context.cluster}"); \
+	 kubectl config set-cluster "$$cluster" --kubeconfig $(EKS_KUBECONFIG) \
+	   --server=https://127.0.0.1:6443 --tls-server-name="$$host" >/dev/null || exit 1; \
+	 kubectl config use-context godough-staging --kubeconfig $(EKS_KUBECONFIG) >/dev/null || exit 1; \
+	 echo "context godough-staging in $(EKS_KUBECONFIG) dials 127.0.0.1:6443 as $$host"; \
+	 if [ -n "$${KUBECONFIG:-}" ] && [ "$$KUBECONFIG" != "$(EKS_KUBECONFIG)" ]; then \
+	   echo "warning: this shell exports KUBECONFIG=$$KUBECONFIG, which overrides that file"; \
+	 elif kubectl version --request-timeout=3s >/dev/null 2>&1; then \
+	   echo "server: reachable"; \
+	 else \
+	   echo "server: NOT reachable. The endpoint is private: run 'make eks-tunnel' in another terminal."; \
+	 fi
 
 aws-test: ## [host] Check the AWS state bucket exists and is not public
 	cd infra/aws-test && go test -count=1 -v ./...

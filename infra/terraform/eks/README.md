@@ -75,20 +75,33 @@ Start the forward in its own terminal and leave it running:
 make eks-tunnel
 ```
 
-In a second terminal, write a kubeconfig that dials the local end of that forward
-but keeps the real hostname as the TLS server name, so the certificate still
-validates:
+In a second terminal:
 
 ```
 make eks-kubeconfig
 ```
 
+That merges a `godough-staging` context into `~/.kube/config` and makes it
+current, so `kubectl` works with nothing exported — the previous version wrote a
+separate file and printed an `export` line, which is a step people skip and then
+see `dial tcp localhost:80`, the error you get from having no kubeconfig at all.
+
+`aws eks update-kubeconfig` merges rather than replacing, so other contexts
+survive; changing the current context is the one side effect. For no side effects
+at all:
+
 ```
-export KUBECONFIG=$PWD/.kubeconfig-eks
+EKS_KUBECONFIG=/tmp/godough-kubeconfig make eks-kubeconfig
 ```
 
-The write is to `./.kubeconfig-eks`, not `~/.kube/config`, so a second cluster
-does not overwrite the first and nothing here touches a working laptop setup.
+The context dials `127.0.0.1:6443` with the real hostname as `tls-server-name`, so
+the certificate validates over the forward. The target ends by saying whether the
+server actually answers, because a context pointing at a port with no forward
+behind it is otherwise indistinguishable from a broken cluster:
+
+```
+server: NOT reachable. The endpoint is private: run 'make eks-tunnel' in another terminal.
+```
 
 ## Smoke test
 
