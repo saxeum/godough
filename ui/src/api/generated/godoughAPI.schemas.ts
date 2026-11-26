@@ -51,6 +51,19 @@ export type BadRequestResponse = Error;
 export type NotFoundResponse = Error;
 
 /**
+ * The body is larger than the API will read. Enforced by the application,
+ * not only by the load balancer, so it holds for a request that reaches
+ * the pod directly.
+ */
+export type PayloadTooLargeResponse = Error;
+
+/**
+ * A create request must declare `Content-Type: application/json`. A charset
+ * parameter is accepted.
+ */
+export type UnsupportedMediaTypeResponse = Error;
+
+/**
  * One or more fields were rejected. Every bad field is reported at once.
  */
 export type ValidationErrorResponse = ValidationError;

@@ -53,6 +53,12 @@ type InternalError = Error
 // NotFound defines model for NotFound.
 type NotFound = Error
 
+// PayloadTooLarge defines model for PayloadTooLarge.
+type PayloadTooLarge = Error
+
+// UnsupportedMediaType defines model for UnsupportedMediaType.
+type UnsupportedMediaType = Error
+
 // CreateSnippetJSONRequestBody defines body for CreateSnippet for application/json ContentType.
 type CreateSnippetJSONRequestBody = CreateSnippetRequest
 
@@ -295,6 +301,10 @@ type InternalErrorJSONResponse Error
 
 type NotFoundJSONResponse Error
 
+type PayloadTooLargeJSONResponse Error
+
+type UnsupportedMediaTypeJSONResponse Error
+
 type ValidationErrorJSONResponse ValidationError
 
 type ListSnippetsRequestObject struct {
@@ -380,6 +390,36 @@ func (response CreateSnippet400JSONResponse) VisitCreateSnippetResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSnippet413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response CreateSnippet413JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.PayloadTooLargeJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSnippet415JSONResponse struct {
+	UnsupportedMediaTypeJSONResponse
+}
+
+func (response CreateSnippet415JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.UnsupportedMediaTypeJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(415)
 	_, err := buf.WriteTo(w)
 	return err
 }

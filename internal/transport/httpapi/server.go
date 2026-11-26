@@ -42,6 +42,13 @@ func (s *Server) Routes() http.Handler {
 	// the API's JSON shape, or a malformed id is the only text/plain response
 	// the service ever sends.
 	badRequest := func(w http.ResponseWriter, r *http.Request, err error) {
+		// MaxBytesReader cutting the body off is a 413, not the 400 a malformed
+		// body gets. Same callback, so the distinction has to be made here.
+		if isBodyTooLarge(err) {
+			s.log.Warn("request body too large", "limit", maxBodyBytes, "method", r.Method, "uri", r.URL.RequestURI())
+			writeJSON(w, http.StatusRequestEntityTooLarge, errorBody(http.StatusRequestEntityTooLarge))
+			return
+		}
 		s.log.Warn("bad request", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
 		writeJSON(w, http.StatusBadRequest, errorBody(http.StatusBadRequest))
 	}
@@ -51,15 +58,26 @@ func (s *Server) Routes() http.Handler {
 		// A handler returned an error: only unexpected failures reach here, since
 		// the documented ones are returned as response objects.
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			// A client that hung up is not a fault. Writing to its connection is
+			// pointless and logging it at ERROR makes the error rate measure
+			// browsers navigating away rather than anything going wrong.
+			if errors.Is(err, context.Canceled) {
+				s.log.Info("request abandoned by the client", "method", r.Method, "uri", r.URL.RequestURI())
+				return
+			}
 			s.log.Error("server error", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
 			writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
 		},
 	})
 
-	return HandlerWithOptions(strict, StdHTTPServerOptions{
+	api := HandlerWithOptions(strict, StdHTTPServerOptions{
 		BaseRouter:       mux,
 		ErrorHandlerFunc: badRequest,
 	})
+
+	// Outside, not inside: the generated handler reads the body before any of its
+	// own middleware sees the request.
+	return bodyGuards(api)
 }
 
 // healthz says the process is alive. It must not touch the database: a database

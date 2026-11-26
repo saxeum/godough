@@ -34,13 +34,17 @@ type App struct {
 
 // New opens the database, proves it is reachable, and builds the chain
 // repository -> service -> transport. A failure here is a boot failure.
-func New(cfg config.Config, log *slog.Logger) (*App, error) {
-	db, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+//
+// ctx carries the boot deadline. It is the caller's, not a constant in here, so
+// that a database which accepts the connection and never answers fails the
+// process in bounded time instead of parking a pod in a half-started state.
+func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error) {
+	db, err := postgres.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
+		return nil, err
 	}
 
-	if err := db.Ping(context.Background()); err != nil {
+	if err := db.Ping(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
