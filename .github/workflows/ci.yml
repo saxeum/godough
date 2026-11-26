@@ -27,10 +27,11 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      # CI connects as the superuser rather than godough_app: the app role and
-      # its grants come from docker-entrypoint-initdb.d, which has no equivalent
-      # in a service container. `make stack-up` is what exercises those.
-      DATABASE_URL: postgres://godough:snippet@localhost:5432/snippet?sslmode=disable
+      # The tests run as the application role, so the grants they exercise are
+      # the grants production has. The owner's credentials are only for the steps
+      # that create things.
+      DATABASE_URL: postgres://godough_app:snippet_app@localhost:5432/snippet?sslmode=disable
+      DATABASE_URL_OWNER: postgres://godough:snippet@localhost:5432/snippet?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
 
@@ -63,7 +64,10 @@ jobs:
         run: make codegen-check
 
       - name: Migrate
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f migrations/0001_create_snippets.sql
+        run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f migrations/0001_create_snippets.sql
+
+      - name: Bootstrap the application role
+        run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f db/bootstrap.sql
 
       # -count=1: the database is external state the test cache cannot see.
       - name: Test
