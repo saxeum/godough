@@ -65,7 +65,9 @@ different inside the network than outside it.
   boot
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URL` — set all
   three or none. Without them `/api/auth/google` is `503`; the secret is a
-  deployment secret, never an image layer
+  deployment secret, never an image layer. The redirect URI must be registered
+  on the OAuth client; the local one is
+  `http://localhost:8080/api/auth/google/callback`
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
   that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
 - `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
