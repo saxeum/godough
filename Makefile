@@ -8,6 +8,13 @@ VULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.10.0
 # Trivy through docker: no install, and the same binary locally and in CI.
 TRIVY := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 image --scanners vuln --quiet
 
+# The contract both languages are generated from, and the pinned generators.
+# Same policy as govulncheck: `go run` / npx with an exact version, so nothing
+# has to be installed and go.mod stays a description of the compiled binary.
+SPEC := spec/openapi.yaml
+OAPI_CODEGEN := go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.9.0
+GENERATED := internal/transport/httpapi/openapi.gen.go ui/src/api/generated
+
 # How many modules to show in `make symbols`.
 N ?= 20
 
@@ -21,10 +28,32 @@ N ?= 20
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate codegen codegen-go codegen-ts codegen-check
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+# ---- the contract --------------------------------------------------------
+
+codegen-go: ## [host] Regenerate the Go server contract from spec/openapi.yaml
+	$(OAPI_CODEGEN) -config spec/oapi-codegen.yaml $(SPEC)
+
+codegen-ts: ## [host] Regenerate the UI's types and client from spec/openapi.yaml
+	npm --prefix ui run codegen
+
+codegen: codegen-go codegen-ts ## [host] Regenerate both sides
+
+# The gate: regenerate, then fail if the tree changed. `git status --porcelain`
+# rather than `git diff --exit-code` because a newly generated file is untracked,
+# and an untracked file is exactly the drift this is looking for.
+codegen-check: ## [host] Fail if the committed generated code is stale
+	@$(MAKE) --no-print-directory -s codegen
+	@out=$$(git status --porcelain -- $(GENERATED)); \
+	if [ -n "$$out" ]; then \
+		echo "generated code is out of date; run make codegen and commit the result"; \
+		echo "$$out"; \
+		exit 1; \
+	fi
 
 # ---- host ---------------------------------------------------------------
 

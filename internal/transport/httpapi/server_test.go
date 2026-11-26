@@ -1,0 +1,358 @@
+package httpapi_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/saxeum/godough/internal/domain/snippet"
+	"github.com/saxeum/godough/internal/service"
+	"github.com/saxeum/godough/internal/transport/httpapi"
+)
+
+// fakeRepo lets the transport be tested without a database, which is the
+// reason the service takes an interface rather than a pool.
+type fakeRepo struct {
+	items []snippet.Snippet
+	err   error
+	next  int64
+}
+
+func newFakeRepo() *fakeRepo {
+	return &fakeRepo{
+		items: []snippet.Snippet{
+			{ID: 2, Title: "newer", Content: "b"},
+			{ID: 1, Title: "older", Content: "a"},
+		},
+		next: 3,
+	}
+}
+
+func (f *fakeRepo) List(context.Context) ([]snippet.Snippet, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.items, nil
+}
+
+func (f *fakeRepo) Get(_ context.Context, id int64) (snippet.Snippet, error) {
+	if f.err != nil {
+		return snippet.Snippet{}, f.err
+	}
+	for _, item := range f.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return snippet.Snippet{}, snippet.ErrNotFound
+}
+
+func (f *fakeRepo) Insert(_ context.Context, in snippet.New) (snippet.Snippet, error) {
+	if f.err != nil {
+		return snippet.Snippet{}, f.err
+	}
+	item := snippet.Snippet{ID: f.next, Title: in.Title, Content: in.Content}
+	f.next++
+	f.items = append([]snippet.Snippet{item}, f.items...)
+	return item, nil
+}
+
+func (f *fakeRepo) Delete(_ context.Context, id int64) error {
+	if f.err != nil {
+		return f.err
+	}
+	idx := slices.IndexFunc(f.items, func(s snippet.Snippet) bool { return s.ID == id })
+	if idx < 0 {
+		return snippet.ErrNotFound
+	}
+	f.items = slices.Delete(f.items, idx, idx+1)
+	return nil
+}
+
+func newRouter(t *testing.T, repo service.SnippetRepository) http.Handler {
+	t.Helper()
+
+	ready := func(context.Context) error { return nil }
+	return httpapi.NewServer(slog.New(slog.DiscardHandler), service.NewSnippetService(repo), ready).Routes()
+}
+
+// do runs one request and returns the recorder, so each test reads the way the
+// client sees it: a status, a content type and a body.
+func do(t *testing.T, handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(method, path, reader))
+	return rec
+}
+
+func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+	t.Helper()
+
+	var out T
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("body is not the expected JSON: %v (body %q)", err, rec.Body.String())
+	}
+	return out
+}
+
+func TestListSnippets(t *testing.T) {
+	rec := do(t, newRouter(t, newFakeRepo()), http.MethodGet, "/api/snippet", "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+
+	var got []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body is not a JSON array: %v (body %q)", err, rec.Body.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d snippets, want 2", len(got))
+	}
+
+	// The wire format is the spec's, not the Go struct's: camelCase keys.
+	for _, key := range []string{"id", "title", "content", "created", "expires"} {
+		if _, ok := got[0][key]; !ok {
+			t.Errorf("snippet has no %q key, got %v", key, got[0])
+		}
+	}
+	if _, ok := got[0]["Title"]; ok {
+		t.Errorf("snippet has a PascalCase Title key; the spec says camelCase")
+	}
+}
+
+func TestListSnippetsIsAnEmptyArrayNotNull(t *testing.T) {
+	rec := do(t, newRouter(t, &fakeRepo{}), http.MethodGet, "/api/snippet", "")
+
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("empty list body = %q, want []", body)
+	}
+}
+
+func TestGetSnippet(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	rec := do(t, router, http.MethodGet, "/api/snippet/1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	got := decode[map[string]any](t, rec)
+	if got["title"] != "older" {
+		t.Errorf("title = %v, want older", got["title"])
+	}
+
+	rec = do(t, router, http.MethodGet, "/api/snippet/999", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing id: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if body := decode[map[string]string](t, rec); body["error"] != "Not Found" {
+		t.Errorf("missing id: body = %v, want a Not Found error", body)
+	}
+}
+
+// A well-formed integer that names no resource is a missing resource, not a
+// malformed request: identity starts at 1, so 0 and -1 are 404.
+func TestOutOfRangeIDIsNotFound(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	for _, path := range []string{"/api/snippet/0", "/api/snippet/-1"} {
+		t.Run(path, func(t *testing.T) {
+			if rec := do(t, router, http.MethodGet, path, ""); rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+			}
+		})
+	}
+}
+
+func TestMalformedIDIsABadRequest(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	// Not an integer at all, so the router rejects it before any handler runs.
+	for _, path := range []string{"/api/snippet/abc", "/api/snippet/1.5", "/api/snippet/1x"} {
+		t.Run(path, func(t *testing.T) {
+			rec := do(t, router, http.MethodGet, path, "")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", got)
+			}
+			if body := decode[map[string]string](t, rec); body["error"] != "Bad Request" {
+				t.Errorf("body = %v, want a Bad Request error", body)
+			}
+		})
+	}
+}
+
+func TestCreateSnippet(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	rec := do(t, router, http.MethodPost, "/api/snippet",
+		`{"title":"a new haiku","content":"first line\nsecond line","expiresInDays":7}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/api/snippet/3"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+
+	created := decode[map[string]any](t, rec)
+	if created["title"] != "a new haiku" {
+		t.Errorf("title = %v, want %q", created["title"], "a new haiku")
+	}
+	if created["content"] != "first line\nsecond line" {
+		t.Errorf("content = %v, want the posted value", created["content"])
+	}
+}
+
+func TestCreateSnippetRejects(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		want     int
+		wantKeys []string
+	}{
+		{name: "not json", body: `not json`, want: http.StatusBadRequest},
+		// null decodes into zero values without an error, so it fails validation
+		// rather than decoding: the client sent a body, it just was not a valid one.
+		{name: "null body", body: `null`, want: http.StatusUnprocessableEntity, wantKeys: []string{"content", "expiresInDays", "title"}},
+		{name: "empty", body: `{}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"content", "expiresInDays", "title"}},
+		{name: "empty title", body: `{"title":"","content":"x","expiresInDays":7}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"title"}},
+		{name: "title too long", body: `{"title":"` + strings.Repeat("a", 101) + `","content":"x","expiresInDays":7}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"title"}},
+		{name: "expiry too long", body: `{"title":"t","content":"x","expiresInDays":366}`, want: http.StatusUnprocessableEntity, wantKeys: []string{"expiresInDays"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := do(t, newRouter(t, newFakeRepo()), http.MethodPost, "/api/snippet", tt.body)
+
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
+			}
+			if len(tt.wantKeys) == 0 {
+				return
+			}
+
+			got := decode[struct {
+				Errors map[string]string `json:"errors"`
+			}](t, rec)
+			keys := make([]string, 0, len(got.Errors))
+			for k := range got.Errors {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			if !slices.Equal(keys, tt.wantKeys) {
+				t.Errorf("errors = %v, want %v", keys, tt.wantKeys)
+			}
+		})
+	}
+}
+
+func TestDeleteSnippet(t *testing.T) {
+	repo := newFakeRepo()
+	router := newRouter(t, repo)
+
+	rec := do(t, router, http.MethodDelete, "/api/snippet/1", "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if body := rec.Body.String(); body != "" {
+		t.Errorf("body = %q, want empty", body)
+	}
+
+	// Gone.
+	if rec := do(t, router, http.MethodGet, "/api/snippet/1", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("read after delete: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	// Deleting it again did nothing, so it is a 404 rather than a second 204.
+	if rec := do(t, router, http.MethodDelete, "/api/snippet/1", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("second delete: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestUnexpectedRepositoryErrorIsAJSON500(t *testing.T) {
+	repo := newFakeRepo()
+	repo.err = errors.New("connection refused")
+	router := newRouter(t, repo)
+
+	rec := do(t, router, http.MethodGet, "/api/snippet", "")
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	// The body must not name the cause.
+	if strings.Contains(rec.Body.String(), "connection refused") {
+		t.Errorf("body leaks the internal error: %q", rec.Body.String())
+	}
+	if body := decode[map[string]string](t, rec); body["error"] != "internal server error" {
+		t.Errorf("body = %v, want the generic message", body)
+	}
+}
+
+func TestUnknownRouteAndWrongMethod(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	if rec := do(t, router, http.MethodGet, "/api/snippets", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("old list path: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if rec := do(t, router, http.MethodPost, "/api/snippet/1", ""); rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("wrong method: status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+	// The API serves no files: the SPA is the web container's job.
+	if rec := do(t, router, http.MethodGet, "/", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("root: status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestProbes(t *testing.T) {
+	router := newRouter(t, newFakeRepo())
+
+	rec := do(t, router, http.MethodGet, "/healthz", "")
+	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
+		t.Errorf("healthz = %d %q, want 200 %q", rec.Code, rec.Body.String(), "ok\n")
+	}
+
+	rec = do(t, router, http.MethodGet, "/readyz", "")
+	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
+		t.Errorf("readyz = %d %q, want 200 %q", rec.Code, rec.Body.String(), "ok\n")
+	}
+}
+
+func TestReadyzFailsWhenTheDatabaseDoesNot(t *testing.T) {
+	ready := func(context.Context) error { return errors.New("pool closed") }
+	router := httpapi.NewServer(
+		slog.New(slog.DiscardHandler),
+		service.NewSnippetService(newFakeRepo()),
+		ready,
+	).Routes()
+
+	rec := do(t, router, http.MethodGet, "/readyz", "")
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+}

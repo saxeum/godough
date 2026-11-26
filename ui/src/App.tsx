@@ -45,14 +45,14 @@ function SnippetList() {
     <main>
       <h2>Latest Snippets</h2>
       {state.data.map((s) => (
-        <div className="snippet" key={s.ID}>
+        <div className="snippet" key={s.id}>
           <div className="metadata">
             <strong>
-              <Link to={`/snippet/${s.ID}`}>{s.Title}</Link>
+              <Link to={`/snippet/${s.id}`}>{s.title}</Link>
             </strong>
-            <span>{new Date(s.Expires).toLocaleDateString()}</span>
+            <span>{new Date(s.expires).toLocaleDateString()}</span>
           </div>
-          <pre>{s.Content}</pre>
+          <pre>{s.content}</pre>
         </div>
       ))}
     </main>
@@ -61,17 +61,17 @@ function SnippetList() {
 
 function SnippetView() {
   const { id = '' } = useParams()
-  const state = useFetched(() => getSnippet(id), id)
+  const state = useFetched(() => getSnippet(Number(id)), id)
   const navigate = useNavigate()
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
   async function remove(s: Snippet) {
-    if (!window.confirm(`Delete "${s.Title}"?`)) return
+    if (!window.confirm(`Delete "${s.title}"?`)) return
     setDeleting(true)
     setDeleteError('')
     try {
-      await deleteSnippet(s.ID)
+      await deleteSnippet(s.id)
       navigate('/')
     } catch (err) {
       setDeleteError(err instanceof ApiError ? `Could not delete (${err.status}).` : 'Could not reach the server.')
@@ -81,21 +81,24 @@ function SnippetView() {
 
   if (state.status === 'loading') return <Message>Loading…</Message>
   if (state.status === 'failed') {
-    const missing = state.error instanceof ApiError && state.error.status === 404
+    // 404 is a well-formed id that names nothing; 400 is an id that is not a
+    // number at all, which the API's router rejects before any handler runs.
+    // To someone reading the page both mean the same thing, so both say it.
+    const missing = state.error instanceof ApiError && (state.error.status === 404 || state.error.status === 400)
     return missing ? <Message>That snippet does not exist.</Message> : <Message>Could not load the snippet: {state.error.message}</Message>
   }
 
   const s: Snippet = state.data
   return (
     <main>
-      <h2>{s.Title}</h2>
+      <h2>{s.title}</h2>
       <div className="snippet">
         <div className="metadata">
           <strong>Created</strong>
-          <time>{new Date(s.Created).toLocaleString()}</time>
-          <span>Expires {new Date(s.Expires).toLocaleDateString()}</span>
+          <time>{new Date(s.created).toLocaleString()}</time>
+          <span>Expires {new Date(s.expires).toLocaleDateString()}</span>
         </div>
-        <pre>{s.Content}</pre>
+        <pre>{s.content}</pre>
       </div>
       {deleteError && <p className="error">{deleteError}</p>}
       <button type="button" onClick={() => remove(s)} disabled={deleting}>
