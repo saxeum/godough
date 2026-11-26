@@ -88,27 +88,5 @@ from the EKS node or a job inside the VPC once the cluster exists.
 
 ## Break-glass database access
 
-The `godough-ssm-bastion` instance is a `t4g.nano` in a public subnet with no
-inbound rules and no SSH. Access is SSM Session Manager only, and the database
-security group accepts 5432 from the bastion.
-
-Install the Session Manager plugin locally, then forward a port:
-
-```
-aws ssm start-session --target <bastion_instance_id> \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters host="<rds-endpoint>",portNumber="5432",localPortNumber="15432"
-```
-
-Keep `verify-full` by using the RDS hostname for verification and the tunnel
-address for the connection:
-
-```
-curl -o global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-SECRET_ARN=$(cd infra/terraform/data && terraform output -raw master_user_secret_arn)
-PGPASSWORD="$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --query SecretString --output text | jq -r .password)" \
-psql "host=<rds-endpoint> hostaddr=127.0.0.1 port=15432 dbname=godough user=godough sslmode=verify-full sslrootcert=global-bundle.pem"
-```
-
-`global-bundle.pem` is gitignored. The bastion is for break-glass access; the
-long-term path is an EKS pod or Job in the private subnets.
+See [data/README.md](data/README.md) for the SSM tunnel, CA bundle and `psql`
+commands.
