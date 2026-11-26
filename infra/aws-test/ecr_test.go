@@ -17,6 +17,10 @@ import (
 const (
 	apiRepository = "godough-api"
 	webRepository = "godough-web"
+
+	// GitHub's OIDC subject now carries the immutable owner and repository
+	// ids. Keep this exact: a name-only subject would let a renamed repo match.
+	githubSubject = "repo:saxeum@343752441/godough@1472378230:ref:refs/heads/master"
 )
 
 // TestECRRepositoriesAreImmutableAndScanned is the #103 check: both images
@@ -112,8 +116,8 @@ func TestGitHubPublishRoleTrustIsNarrow(t *testing.T) {
 		t.Errorf("audience condition = %v, want sts.amazonaws.com", aud)
 	}
 	sub := conditionValues(statement.Condition["StringLike"]["token.actions.githubusercontent.com:sub"])
-	if len(sub) != 1 || sub[0] != "repo:saxeum/godough:ref:refs/heads/master" {
-		t.Errorf("subject condition = %v, want only repo:saxeum/godough:ref:refs/heads/master", sub)
+	if len(sub) != 1 || sub[0] != githubSubject {
+		t.Errorf("subject condition = %v, want only %s", sub, githubSubject)
 	}
 }
 
