@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check tf-bootstrap-init tf-bootstrap-validate tf-bootstrap-plan tf-bootstrap-apply aws-test
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -184,20 +184,6 @@ cover-raw: cover ## [both] The same run, unfiltered: generated code included
 	go tool cover -html=$(COVER_PROFILE) -o coverage-raw.html
 
 # ---- infrastructure -----------------------------------------------------
-
-TF_BOOTSTRAP := infra/terraform/bootstrap
-
-tf-bootstrap-init: ## [host] terraform init for the S3 state bucket
-	cd $(TF_BOOTSTRAP) && terraform init
-
-tf-bootstrap-validate: tf-bootstrap-init ## [host] Validate the bootstrap stack
-	cd $(TF_BOOTSTRAP) && terraform validate
-
-tf-bootstrap-plan: tf-bootstrap-init ## [host] Plan the S3 state bucket
-	cd $(TF_BOOTSTRAP) && terraform plan -out=tfplan
-
-tf-bootstrap-apply: tf-bootstrap-plan ## [host] Create the S3 state bucket
-	cd $(TF_BOOTSTRAP) && terraform apply -auto-approve tfplan
 
 aws-test: ## [host] Check the AWS state bucket exists and is not public
 	cd infra/aws-test && go test -count=1 -v ./...

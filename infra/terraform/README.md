@@ -8,10 +8,11 @@ Two stacks, in order:
 ## Bootstrap
 
 ```
-make tf-bootstrap-init
-make tf-bootstrap-validate
-make tf-bootstrap-plan
-make tf-bootstrap-apply
+cd infra/terraform/bootstrap
+terraform init
+terraform validate
+terraform plan -out=tfplan
+terraform apply tfplan
 ```
 
 The bucket is named `godough-terraform-state-<account-id>`, versioned, encrypted with SSE-S3, public access blocked, and denies any request whose `aws:SecureTransport` is false. Read the outputs with:
