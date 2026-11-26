@@ -12,9 +12,15 @@ RUN go mod download
 COPY . .
 
 # Static, no libc, no shell: pgx is pure Go, so CGO is not needed.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/godough ./cmd/web
+#
+# The migrator ships in the same image so the Kubernetes migration Job (#5) can
+# run the digest that is deployed rather than a second image that can drift from
+# it. Different entrypoint, same artifact.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/godough ./cmd/web && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/godough /godough
+COPY --from=build /out/migrate /migrate
 EXPOSE 4000
 ENTRYPOINT ["/godough"]

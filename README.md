@@ -57,7 +57,11 @@ the database is `postgres:5432` inside the network and `127.0.0.1:5432` outside.
 - `SNIPPET_ADDR` — host:port the API listens on (`:4000`)
 - `DATABASE_URL` — a pgx DSN; the app connects as `godough_app`, a non-superuser
   that owns nothing, created by `db/bootstrap.sql` (`make db-bootstrap`)
-- Migrations run as `godough`, the owner, over the container's trusted socket
+- `DATABASE_URL_OWNER` — the owner's DSN, read only by `make db-migrate`. Two
+  variables rather than one so the migrator cannot accidentally run as the app
+  role, which would fail on the first `CREATE TABLE`
+- Migrations run as `godough`, the owner, and record themselves in
+  `schema_migrations`
 
 Both variables are required. There are no defaults: a missing one exits at
 startup with its name.
@@ -90,6 +94,8 @@ failure still arrives as an `ApiError` with its per-field messages.
 
 ```
 cmd/web/                       main: config, then run
+cmd/migrate/                   applies pending migrations; ships in the same image
+internal/migrate/              discovery, ordering and the per-file transaction
 internal/config/               environment -> Config, validated at startup
 internal/domain/snippet/       entity, create-input, ErrNotFound, ValidationError
 internal/service/              the rules; declares the repository interface it uses

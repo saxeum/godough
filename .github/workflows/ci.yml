@@ -63,11 +63,11 @@ jobs:
       - name: Generated code is up to date
         run: make codegen-check
 
-      - name: Migrate
-        run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f migrations/0001_create_snippets.sql
-
       - name: Bootstrap the application role
         run: psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -1 -f db/bootstrap.sql
+
+      - name: Migrate
+        run: go run ./cmd/migrate -dir migrations
 
       # -count=1: the database is external state the test cache cannot see.
       - name: Test
@@ -78,6 +78,9 @@ jobs:
   # absence a failure rather than a skip).
   e2e:
     runs-on: ubuntu-latest
+    env:
+      # make db-migrate runs the migrator on the host, against compose's published port.
+      DATABASE_URL_OWNER: postgres://godough:snippet@127.0.0.1:5432/snippet?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, runs on node24
 
