@@ -2,13 +2,17 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/saxeum/godough/internal/config"
 	"github.com/saxeum/godough/internal/transport/httpapi"
 )
 
@@ -135,5 +139,68 @@ func TestServeReturnsWhenTheListenerDies(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve did not return for a closed listener")
+	}
+}
+
+// TestAppWiring is the composition root, end to end and through the database:
+// config -> pool -> repository -> service -> transport -> response.
+//
+// Every other test swaps a layer for a fake, so this is the only place where a
+// wrong argument in New shows up. Repo and service are adjacent enough to swap
+// silently, and the result answers every request while answering none of them
+// correctly.
+func TestAppWiring(t *testing.T) {
+	if testing.Short() {
+		t.Skip("database test: make db-up db-migrate, then make test")
+	}
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("DATABASE_URL is not set: copy .env.example to .env")
+	}
+
+	a, err := New(t.Context(), config.Config{Addr: "127.0.0.1:0", DatabaseURL: dsn}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	defer a.Close()
+
+	handler := a.srv.Handler
+	if handler == nil {
+		t.Fatal("New built a server with no handler")
+	}
+
+	// 1. The read path reaches Postgres. This is the assertion that fails if any
+	//    wire in the chain is crossed.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/snippet", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/snippet = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("body is not a JSON array: %v (%q)", err, rec.Body.String())
+	}
+	if items == nil {
+		t.Error("the list decoded as null, want [] — the wiring lost the allocation, or a different query answered")
+	}
+
+	// 2. Readiness is wired to the same pool the queries use, not to a second one
+	//    or to nothing at all.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /readyz with a live pool = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	// 3. And it reports failure when the pool cannot serve. Without this half, a
+	//    readiness check wired to a function that always returns nil passes test 2.
+	a.db.Close()
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("GET /readyz with a closed pool = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }
