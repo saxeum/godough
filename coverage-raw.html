@@ -1,0 +1,1824 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>web: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/saxeum/godough/cmd/web/main.go (52.9%)</option>
+				
+				<option value="file1">github.com/saxeum/godough/internal/app/app.go (81.2%)</option>
+				
+				<option value="file2">github.com/saxeum/godough/internal/config/config.go (100.0%)</option>
+				
+				<option value="file3">github.com/saxeum/godough/internal/domain/snippet/snippet.go (100.0%)</option>
+				
+				<option value="file4">github.com/saxeum/godough/internal/repository/postgres/pool.go (69.2%)</option>
+				
+				<option value="file5">github.com/saxeum/godough/internal/repository/postgres/snippet.go (79.4%)</option>
+				
+				<option value="file6">github.com/saxeum/godough/internal/service/snippet.go (100.0%)</option>
+				
+				<option value="file7">github.com/saxeum/godough/internal/transport/httpapi/guards.go (94.4%)</option>
+				
+				<option value="file8">github.com/saxeum/godough/internal/transport/httpapi/middleware.go (100.0%)</option>
+				
+				<option value="file9">github.com/saxeum/godough/internal/transport/httpapi/openapi.gen.go (51.2%)</option>
+				
+				<option value="file10">github.com/saxeum/godough/internal/transport/httpapi/respond.go (100.0%)</option>
+				
+				<option value="file11">github.com/saxeum/godough/internal/transport/httpapi/server.go (88.9%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "log/slog"
+        "os"
+        "os/signal"
+        "syscall"
+        "time"
+
+        "github.com/saxeum/godough/internal/app"
+        "github.com/saxeum/godough/internal/config"
+)
+
+// bootTimeout bounds how long startup may spend reaching the database. A DSN
+// that points at a host which drops packets would otherwise block for the
+// operating system's TCP timeout, with the pod neither started nor crashed.
+const bootTimeout = 10 * time.Second
+
+func main() {
+        <span class="cov0" title="0">logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+</span>
+        // The signal context is built here and passed in, so the shutdown path can be
+        // driven by a test that cancels a context instead of signalling the test
+        // process. Sending a real signal to your own process is a test that can take
+        // the whole suite with it.
+        <span class="cov0" title="0">ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+        defer stop()
+</span>
+        // run owns every resource, so its defers run on the way out.
+        <span class="cov0" title="0">if err := run(ctx, logger); err != nil </span>{
+                <span class="cov0" title="0">logger.Error("fatal", "err", err)
+                os.Exit(1)
+</span>        }
+}
+
+// run is everything main does once the signals are wired: read the environment,
+// reach the database, serve until ctx ends, and release. Its defers matter — the
+// pool is closed on the way out of here, after the server has drained.
+func run(ctx context.Context, logger *slog.Logger) error {
+        <span class="cov8" title="1">cfg, err := config.FromEnv()
+        if err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+
+        <span class="cov8" title="1">bootCtx, bootDone := context.WithTimeout(ctx, bootTimeout)
+        application, err := app.New(bootCtx, cfg, logger)
+        bootDone()
+        if err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">defer application.Close()
+</span>
+        <span class="cov8" title="1">logger.Info("starting server", "addr", cfg.Addr)
+        return application.Run(ctx)</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">// Package app wires the layers together and owns the process lifecycle. It is
+// the only package that knows all of them: config builds it, main runs it, and
+// nothing below it imports anything above it.
+package app
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "log/slog"
+        "net"
+        "net/http"
+        "time"
+
+        "github.com/jackc/pgx/v5/pgxpool"
+
+        "github.com/saxeum/godough/internal/config"
+        "github.com/saxeum/godough/internal/repository/postgres"
+        "github.com/saxeum/godough/internal/service"
+        "github.com/saxeum/godough/internal/transport/httpapi"
+)
+
+const (
+        readHeaderTimeout = 5 * time.Second
+        // readTimeout bounds the whole request, headers and body. The body is capped
+        // at 1 MiB in the transport, so a client that needs longer than this is
+        // trickling bytes on purpose.
+        readTimeout = 10 * time.Second
+        // writeTimeout must exceed the handler's own deadline, or the connection is
+        // cut before the handler can report why it gave up.
+        writeTimeout = httpapi.RequestTimeout + 5*time.Second
+        idleTimeout  = 60 * time.Second
+        // maxHeaderBytes is 1 MiB, the same as the body cap. Go's default is 1 MiB
+        // too, but naming it means a change here is visible rather than inherited.
+        maxHeaderBytes = 1 &lt;&lt; 20
+
+        // shutdownGrace is how long a draining server waits for in-flight requests.
+        // Kubernetes' terminationGracePeriodSeconds must exceed this plus its preStop
+        // hook, or the pod is killed mid-drain. It is a constant and not a setting
+        // on purpose: the relationship to the manifest is the thing that matters, and
+        // two places to configure one number is how they come to disagree.
+        shutdownGrace = 10 * time.Second
+)
+
+// newHTTPServer builds the server with every limit named.
+//
+// It is separate from New so the limits can be asserted without a database, and
+// so that "which timeout is this" is answered by a constant rather than by a
+// literal inside a struct.
+func newHTTPServer(addr string, handler http.Handler, log *slog.Logger) *http.Server {
+        <span class="cov8" title="1">return &amp;http.Server{
+                Addr:              addr,
+                Handler:           handler,
+                ReadHeaderTimeout: readHeaderTimeout,
+                ReadTimeout:       readTimeout,
+                WriteTimeout:      writeTimeout,
+                IdleTimeout:       idleTimeout,
+                MaxHeaderBytes:    maxHeaderBytes,
+                // Everything Go's server wants to say — TLS handshakes, handler errors,
+                // panics that escaped a handler — goes through the application's logger
+                // instead of the standard library's default one.
+                ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelError),
+</span>        }
+}
+
+// App is a running configuration: the database pool, the HTTP server built over
+// the layers, and the logger they share.
+type App struct {
+        log *slog.Logger
+        db  *pgxpool.Pool
+        srv *http.Server
+}
+
+// New opens the database, proves it is reachable, and builds the chain
+// repository -&gt; service -&gt; transport. A failure here is a boot failure.
+//
+// ctx carries the boot deadline. It is the caller's, not a constant in here, so
+// that a database which accepts the connection and never answers fails the
+// process in bounded time instead of parking a pod in a half-started state.
+func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error) {
+        <span class="cov8" title="1">db, err := postgres.NewPool(ctx, cfg.DatabaseURL)
+        if err != nil </span>{
+                <span class="cov0" title="0">return nil, err
+</span>        }
+
+        <span class="cov8" title="1">if err := db.Ping(ctx); err != nil </span>{
+                <span class="cov0" title="0">db.Close()
+                return nil, fmt.Errorf("ping database: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">repo := postgres.NewSnippetRepository(db)
+        svc := service.NewSnippetService(repo)
+        handler := httpapi.NewServer(log, svc, db.Ping).Routes()
+</span>
+        <span class="cov8" title="1">return &amp;App{
+                log: log,
+                db:  db,
+                srv: newHTTPServer(cfg.Addr, handler, log),
+        }, nil</span>
+}
+
+// Run binds the configured address and serves until ctx is cancelled, then
+// drains. It returns the error that stopped it, or nil after a clean shutdown.
+//
+// Binding before serving means a taken port is an error the caller sees, not a
+// failure inside a goroutine racing the rest of startup.
+func (a *App) Run(ctx context.Context) error {
+        <span class="cov8" title="1">listener, err := net.Listen("tcp", a.srv.Addr)
+        if err != nil </span>{
+                <span class="cov0" title="0">return fmt.Errorf("listen on %s: %w", a.srv.Addr, err)
+</span>        }
+
+        <span class="cov8" title="1">return a.Serve(ctx, listener)</span>
+}
+
+// Serve serves an already-bound listener until ctx is cancelled, then drains.
+//
+// Split from Run so a test can bind port 0, learn the address, and cancel the
+// context — with the listen call buried inside Run there was nothing to drive.
+func (a *App) Serve(ctx context.Context, listener net.Listener) error {
+        <span class="cov8" title="1">serveErr := make(chan error, 1)
+        go func() </span>{
+                <span class="cov8" title="1">err := a.srv.Serve(listener)
+                if errors.Is(err, http.ErrServerClosed) </span>{
+                        <span class="cov8" title="1">a.log.Info("stopped serving new connections")
+                        return
+</span>                }
+                <span class="cov8" title="1">serveErr &lt;- fmt.Errorf("serve: %w", err)</span>
+        }()
+
+        <span class="cov8" title="1">select </span>{
+        case err := &lt;-serveErr:
+                <span class="cov8" title="1">return err</span>
+        case &lt;-ctx.Done():<span class="cov8" title="1"></span>
+        }
+
+        <span class="cov8" title="1">shutdownCtx, release := context.WithTimeout(context.Background(), shutdownGrace)
+        defer release()
+</span>
+        <span class="cov8" title="1">if err := a.srv.Shutdown(shutdownCtx); err != nil </span>{
+                // Shutdown returning an error means requests are still running. Close the
+                // connections so they stop, rather than letting the deferred pool Close
+                // pull the database out from under handlers that are mid-query.
+                <span class="cov0" title="0">a.srv.Close()
+                return fmt.Errorf("shutdown: %w", err)
+</span>        }
+        <span class="cov8" title="1">a.log.Info("graceful shutdown complete")
+        return nil</span>
+}
+
+// Close releases the database pool. It is separate from Run so the caller
+// controls the order: the server drains first, then the pool goes.
+func (a *App) Close() {
+        <span class="cov8" title="1">a.db.Close()
+</span>}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">// Package config reads the process environment once, at startup, into a struct.
+// Validation happens here rather than at first use, so a missing setting is a
+// clear exit at boot instead of a nil pointer under load.
+package config
+
+import (
+        "errors"
+        "os"
+)
+
+// Config is what the process needs to run. There are no defaults: a missing
+// value names itself and exits.
+type Config struct {
+        Addr        string
+        DatabaseURL string
+}
+
+// FromEnv reads and validates the environment.
+func FromEnv() (Config, error) {
+        <span class="cov8" title="1">addr := os.Getenv("SNIPPET_ADDR")
+        if addr == "" </span>{
+                <span class="cov8" title="1">return Config{}, errors.New("SNIPPET_ADDR is not set")
+</span>        }
+
+        <span class="cov8" title="1">dsn := os.Getenv("DATABASE_URL")
+        if dsn == "" </span>{
+                <span class="cov8" title="1">return Config{}, errors.New("DATABASE_URL is not set")
+</span>        }
+
+        <span class="cov8" title="1">return Config{Addr: addr, DatabaseURL: dsn}, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">// Package snippet is the snippet entity and the errors the layers above it are
+// allowed to see. It imports nothing but the standard library: this is the
+// bottom of the dependency graph, so a change up here cannot drag a driver or an
+// HTTP concern down with it.
+package snippet
+
+import (
+        "errors"
+        "fmt"
+        "sort"
+        "time"
+)
+
+// ErrNotFound is returned when no snippet has the requested id. The transport
+// turns it into 404; nothing above this package needs to know how.
+var ErrNotFound = errors.New("snippet not found")
+
+// The limits the API publishes. They live here because both the service that
+// enforces them and the tests that assert them need the same numbers, and
+// because spec/openapi.yaml declares the same values in prose and constraints.
+const (
+        TitleMaxRunes = 100
+        ExpiryMinDays = 1
+        ExpiryMaxDays = 365
+)
+
+// Snippet is one stored snippet. Created and Expires are set by the database, so
+// a caller never guesses at them.
+type Snippet struct {
+        ID      int64
+        Title   string
+        Content string
+        Created time.Time
+        Expires time.Time
+}
+
+// New is the input to Create. It is a separate type from Snippet because a
+// caller cannot choose an id or a timestamp.
+type New struct {
+        Title         string
+        Content       string
+        ExpiresInDays int
+}
+
+// ValidationError carries every rejected field at once, so a form can show them
+// all rather than one per round trip. The names are the JSON names, not the Go
+// ones: this type is serialised directly.
+type ValidationError struct {
+        Fields map[string]string
+}
+
+func (e *ValidationError) Error() string {
+        <span class="cov8" title="1">keys := make([]string, 0, len(e.Fields))
+        for k := range e.Fields </span>{
+                <span class="cov8" title="1">keys = append(keys, k)
+</span>        }
+        <span class="cov8" title="1">sort.Strings(keys)
+        return fmt.Sprintf("invalid fields: %v", keys)</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package postgres
+
+import (
+        "context"
+        "fmt"
+
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Session limits applied to every connection in the pool.
+//
+// Postgres defaults statement_timeout to zero, which is no limit at all, so a
+// query that waits on a lock or scans a growing table holds its connection until
+// the client gives up. With one connection per concurrent request, a handful of
+// those is the whole replica. A bound here is the difference between a slow
+// query and an outage.
+//
+// statement_timeout must stay below any per-request deadline (#36): if the
+// client gives up first, the server keeps working on a request nobody wants.
+const (
+        StatementTimeout = "5s"
+        LockTimeout      = "2s"
+)
+
+// NewPool opens the connection pool and applies the session limits to every
+// connection, including ones opened later to replace a dropped connection —
+// which is why this is AfterConnect and not three statements after startup.
+func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+        <span class="cov8" title="1">cfg, err := pgxpool.ParseConfig(dsn)
+        if err != nil </span>{
+                <span class="cov0" title="0">return nil, fmt.Errorf("parse database url: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error </span>{
+                // set_config rather than SET: SET does not take parameters.
+                <span class="cov8" title="1">if _, err := conn.Exec(ctx, `SELECT set_config('statement_timeout', $1, false)`, StatementTimeout); err != nil </span>{
+                        <span class="cov0" title="0">return fmt.Errorf("set statement_timeout: %w", err)
+</span>                }
+                <span class="cov8" title="1">if _, err := conn.Exec(ctx, `SELECT set_config('lock_timeout', $1, false)`, LockTimeout); err != nil </span>{
+                        <span class="cov0" title="0">return fmt.Errorf("set lock_timeout: %w", err)
+</span>                }
+                <span class="cov8" title="1">return nil</span>
+        }
+
+        <span class="cov8" title="1">pool, err := pgxpool.NewWithConfig(ctx, cfg)
+        if err != nil </span>{
+                <span class="cov0" title="0">return nil, fmt.Errorf("open database: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">return pool, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">// Package postgres is the storage layer: the only package in the tree that
+// knows SQL. It implements service.SnippetRepository and translates pgx's
+// vocabulary into the domain's — ErrNoRows becomes snippet.ErrNotFound, and a
+// driver error keeps its cause for the log.
+package postgres
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "time"
+
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
+
+        "github.com/saxeum/godough/internal/domain/snippet"
+)
+
+// row is the shape of one snippets row: the columns of the query, in order.
+//
+// It exists so the scan and the query are in the same file. Scanning straight
+// into snippet.Snippet, matching by field name, made
+// the domain package implicitly coupled to column names and turned "add a field
+// to the domain type" into a runtime failure in a package the author was not
+// looking at. Positional scanning into a local struct keeps the coupling here,
+// next to the SQL that has to change with it.
+type row struct {
+        ID      int64
+        Title   string
+        Content string
+        Created time.Time
+        Expires time.Time
+}
+
+func (r row) toDomain() snippet.Snippet {
+        <span class="cov8" title="1">return snippet.Snippet{
+                ID:      r.ID,
+                Title:   r.Title,
+                Content: r.Content,
+                Created: r.Created,
+                Expires: r.Expires,
+</span>        }
+}
+
+// SnippetRepository talks to the snippets table.
+type SnippetRepository struct {
+        db *pgxpool.Pool
+}
+
+func NewSnippetRepository(db *pgxpool.Pool) *SnippetRepository {
+        <span class="cov8" title="1">return &amp;SnippetRepository{db: db}
+</span>}
+
+// List returns every snippet, newest first. The id breaks the tie: created is
+// identical for rows written in the same transaction, which the seed rows are.
+func (r *SnippetRepository) List(ctx context.Context) ([]snippet.Snippet, error) {
+        <span class="cov8" title="1">rows, err := r.db.Query(ctx, `
+                SELECT id, title, content, created, expires
+                FROM snippets
+                ORDER BY created DESC, id DESC`)
+        if err != nil </span>{
+                <span class="cov0" title="0">return nil, fmt.Errorf("query snippets: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">scanned, err := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
+        if err != nil </span>{
+                <span class="cov0" title="0">return nil, fmt.Errorf("collect snippets: %w", err)
+</span>        }
+
+        // Allocated, not nil: a nil slice marshals to null and the contract says [].
+        <span class="cov8" title="1">items := make([]snippet.Snippet, 0, len(scanned))
+        for _, r := range scanned </span>{
+                <span class="cov8" title="1">items = append(items, r.toDomain())
+</span>        }
+
+        <span class="cov8" title="1">return items, nil</span>
+}
+
+// Get returns one snippet, or snippet.ErrNotFound.
+func (r *SnippetRepository) Get(ctx context.Context, id int64) (snippet.Snippet, error) {
+        <span class="cov8" title="1">rows, err := r.db.Query(ctx, `
+                SELECT id, title, content, created, expires
+                FROM snippets
+                WHERE id = $1`, id)
+        if err != nil </span>{
+                <span class="cov0" title="0">return snippet.Snippet{}, fmt.Errorf("query snippet %d: %w", id, err)
+</span>        }
+
+        <span class="cov8" title="1">scanned, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByPos[row])
+        if errors.Is(err, pgx.ErrNoRows) </span>{
+                <span class="cov8" title="1">return snippet.Snippet{}, snippet.ErrNotFound
+</span>        }
+        <span class="cov8" title="1">if err != nil </span>{
+                <span class="cov0" title="0">return snippet.Snippet{}, fmt.Errorf("collect snippet %d: %w", id, err)
+</span>        }
+
+        <span class="cov8" title="1">return scanned.toDomain(), nil</span>
+}
+
+// Insert writes one snippet and returns the row as the database stored it, so
+// the caller never has to guess at created and expires.
+func (r *SnippetRepository) Insert(ctx context.Context, in snippet.New) (snippet.Snippet, error) {
+        <span class="cov8" title="1">rows, err := r.db.Query(ctx, `
+                INSERT INTO snippets (title, content, created, expires)
+                VALUES ($1, $2, now(), now() + make_interval(days =&gt; $3))
+                RETURNING id, title, content, created, expires`, in.Title, in.Content, in.ExpiresInDays)
+        if err != nil </span>{
+                <span class="cov0" title="0">return snippet.Snippet{}, fmt.Errorf("insert snippet: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">scanned, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByPos[row])
+        if err != nil </span>{
+                <span class="cov0" title="0">return snippet.Snippet{}, fmt.Errorf("collect inserted snippet: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">return scanned.toDomain(), nil</span>
+}
+
+// Delete removes one snippet, or reports snippet.ErrNotFound when it matched
+// nothing. The distinction matters: the second DELETE of one row is a 404.
+func (r *SnippetRepository) Delete(ctx context.Context, id int64) error {
+        <span class="cov8" title="1">tag, err := r.db.Exec(ctx, `DELETE FROM snippets WHERE id = $1`, id)
+        if err != nil </span>{
+                <span class="cov0" title="0">return fmt.Errorf("delete snippet %d: %w", id, err)
+</span>        }
+        <span class="cov8" title="1">if tag.RowsAffected() == 0 </span>{
+                <span class="cov8" title="1">return snippet.ErrNotFound
+</span>        }
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">// Package service holds the rules: what a valid snippet is, and what the API
+// does about one that is not. It knows nothing about HTTP and nothing about
+// Postgres, which is what makes it testable without either.
+package service
+
+import (
+        "context"
+        "strings"
+        "unicode/utf8"
+
+        "github.com/saxeum/godough/internal/domain/snippet"
+)
+
+// SnippetRepository is the whole of what the service needs from storage. It is
+// declared here, where it is consumed rather than where it is implemented, so
+// the service can be exercised with a map and the Postgres package cannot leak a
+// query detail upward.
+type SnippetRepository interface {
+        List(ctx context.Context) ([]snippet.Snippet, error)
+        Get(ctx context.Context, id int64) (snippet.Snippet, error)
+        Insert(ctx context.Context, in snippet.New) (snippet.Snippet, error)
+        Delete(ctx context.Context, id int64) error
+}
+
+// SnippetService is the business layer for snippets.
+type SnippetService struct {
+        repo SnippetRepository
+}
+
+func NewSnippetService(repo SnippetRepository) *SnippetService {
+        <span class="cov8" title="1">return &amp;SnippetService{repo: repo}
+</span>}
+
+// List returns every stored snippet, newest first.
+func (s *SnippetService) List(ctx context.Context) ([]snippet.Snippet, error) {
+        <span class="cov8" title="1">return s.repo.List(ctx)
+</span>}
+
+// Get returns one snippet, or snippet.ErrNotFound.
+func (s *SnippetService) Get(ctx context.Context, id int64) (snippet.Snippet, error) {
+        <span class="cov8" title="1">if id &lt; 1 </span>{
+                <span class="cov8" title="1">return snippet.Snippet{}, snippet.ErrNotFound
+</span>        }
+        <span class="cov8" title="1">return s.repo.Get(ctx, id)</span>
+}
+
+// Create validates the input and stores it, returning the row as the database
+// wrote it.
+func (s *SnippetService) Create(ctx context.Context, in snippet.New) (snippet.Snippet, error) {
+        <span class="cov8" title="1">if bad := validate(in); len(bad) &gt; 0 </span>{
+                <span class="cov8" title="1">return snippet.Snippet{}, &amp;snippet.ValidationError{Fields: bad}
+</span>        }
+        <span class="cov8" title="1">return s.repo.Insert(ctx, in)</span>
+}
+
+// Delete removes one snippet, or reports snippet.ErrNotFound.
+func (s *SnippetService) Delete(ctx context.Context, id int64) error {
+        <span class="cov8" title="1">if id &lt; 1 </span>{
+                <span class="cov8" title="1">return snippet.ErrNotFound
+</span>        }
+        <span class="cov8" title="1">return s.repo.Delete(ctx, id)</span>
+}
+
+// validate reports every bad field at once. The keys are the JSON names the
+// client sent, because they are rendered under the matching input.
+func validate(in snippet.New) map[string]string {
+        <span class="cov8" title="1">bad := map[string]string{}
+</span>
+        <span class="cov8" title="1">switch </span>{
+        case strings.TrimSpace(in.Title) == "":
+                <span class="cov8" title="1">bad["title"] = "is required"</span>
+        case utf8.RuneCountInString(in.Title) &gt; snippet.TitleMaxRunes:
+                // varchar(100) counts characters, not bytes.
+                <span class="cov8" title="1">bad["title"] = "must be at most 100 characters"</span>
+        }
+
+        <span class="cov8" title="1">if strings.TrimSpace(in.Content) == "" </span>{
+                <span class="cov8" title="1">bad["content"] = "is required"
+</span>        }
+
+        <span class="cov8" title="1">if in.ExpiresInDays &lt; snippet.ExpiryMinDays || in.ExpiresInDays &gt; snippet.ExpiryMaxDays </span>{
+                <span class="cov8" title="1">bad["expiresInDays"] = "must be between 1 and 365"
+</span>        }
+
+        <span class="cov8" title="1">return bad</span>
+}
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package httpapi
+
+import (
+        "errors"
+        "mime"
+        "net/http"
+)
+
+// maxBodyBytes is the largest request body the application will read.
+//
+// It has to live here rather than in the contract: the generated strict handler
+// decodes r.Body before its own StrictMiddlewareFunc chain runs, so a strict
+// middleware is already too late. nginx happens to enforce the same number,
+// which is why its absence was invisible until a request was sent to the port
+// behind nginx.
+//
+// 1 MiB is what nginx was enforcing by default. #40 lowers it and reports an
+// over-long `content` as a field error rather than a 413; this is the transport
+// guard that makes that safe to do.
+const maxBodyBytes = 1 &lt;&lt; 20
+
+// bodyGuards applies the two checks the generated code does not make: how large
+// a body may be, and what media type it must claim. Both are request-shaping, so
+// both belong in front of everything else.
+func bodyGuards(next http.Handler) http.Handler {
+        <span class="cov8" title="1">return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">if r.Body != nil &amp;&amp; r.Body != http.NoBody </span>{
+                        <span class="cov8" title="1">r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+</span>                }
+
+                // Only when there is a body to describe. A POST with nothing in it is not
+                // a media-type problem, and routing must get the chance to answer 405
+                // before anything here does: this runs in front of the mux, so a check
+                // that fires on every POST would turn "wrong method" into "wrong type".
+                // -1 means an unknown length (chunked), which still carries a body.
+                <span class="cov8" title="1">if carriesBody(r.Method) &amp;&amp; r.ContentLength != 0 &amp;&amp; !isJSON(r.Header.Get("Content-Type")) </span>{
+                        <span class="cov8" title="1">writeJSON(w, http.StatusUnsupportedMediaType, errorBody(http.StatusUnsupportedMediaType))
+                        return
+</span>                }
+
+                <span class="cov8" title="1">next.ServeHTTP(w, r)</span>
+        })
+}
+
+func carriesBody(method string) bool {
+        <span class="cov8" title="1">switch method </span>{
+        case http.MethodPost, http.MethodPut, http.MethodPatch:
+                <span class="cov8" title="1">return true</span>
+        }
+        <span class="cov8" title="1">return false</span>
+}
+
+// isJSON tolerates the charset parameter real clients send. It is deliberately
+// strict about the media type itself: text/plain, multipart/form-data and
+// application/x-www-form-urlencoded are the three a cross-site &lt;form&gt; can send
+// without a preflight, so accepting them is the first half of a CSRF problem
+// that #55 exists to close.
+func isJSON(contentType string) bool {
+        <span class="cov8" title="1">if contentType == "" </span>{
+                <span class="cov8" title="1">return false
+</span>        }
+        <span class="cov8" title="1">mediaType, _, err := mime.ParseMediaType(contentType)
+        if err != nil </span>{
+                <span class="cov0" title="0">return false
+</span>        }
+        <span class="cov8" title="1">return mediaType == "application/json"</span>
+}
+
+// isBodyTooLarge reports whether the decoder failed because MaxBytesReader cut
+// the body off, which is a 413 rather than the 400 a malformed body gets.
+func isBodyTooLarge(err error) bool {
+        <span class="cov8" title="1">var tooLarge *http.MaxBytesError
+        return errors.As(err, &amp;tooLarge)
+</span>}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package httpapi
+
+import (
+        "context"
+        "log/slog"
+        "net/http"
+        "runtime/debug"
+        "time"
+)
+
+// RequestTimeout bounds one request end to end, from the moment the router hands
+// it over to the moment the handler returns.
+//
+// It must exceed the database's statement_timeout (postgres.StatementTimeout,
+// 5s) so a slow query surfaces as a database error that names the cause. If the
+// request deadline fired first, every slow query would look identical and the
+// log would say only "deadline exceeded".
+const RequestTimeout = 15 * time.Second
+
+// recoverer turns a panic into the API's own 500 and keeps the process serving.
+//
+// Without it, a panic is caught by net/http, which closes the connection with no
+// body and writes to http.Server.ErrorLog — a different stream in a different
+// format from everything else the service logs.
+func recoverer(log *slog.Logger, next http.Handler) http.Handler {
+        <span class="cov8" title="1">return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">defer func() </span>{
+                        <span class="cov8" title="1">recovered := recover()
+                        if recovered == nil </span>{
+                                <span class="cov8" title="1">return
+</span>                        }
+
+                        // ErrAbortHandler is how a handler asks for the connection to be
+                        // aborted, and net/http handles it itself. Swallowing it would keep
+                        // a connection alive that the handler wanted gone.
+                        <span class="cov8" title="1">if recovered == http.ErrAbortHandler </span>{
+                                <span class="cov8" title="1">panic(recovered)</span>
+                        }
+
+                        <span class="cov8" title="1">log.Error("panic recovered",
+                                "panic", recovered,
+                                "stack", string(debug.Stack()),
+                                "method", r.Method,
+                                "uri", r.URL.RequestURI(),
+                        )
+                        writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))</span>
+                }()
+
+                <span class="cov8" title="1">next.ServeHTTP(w, r)</span>
+        })
+}
+
+// requestDeadline puts a deadline on the request context, so a handler blocked on
+// the database is cancelled by the server rather than by the client leaving.
+//
+// It is the context, not http.TimeoutHandler: pgx watches the context and stops
+// the query, whereas a timeout handler would answer the client and leave the
+// query running.
+func requestDeadline(timeout time.Duration, next http.Handler) http.Handler {
+        <span class="cov8" title="1">return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">ctx, cancel := context.WithTimeout(r.Context(), timeout)
+                defer cancel()
+</span>
+                <span class="cov8" title="1">next.ServeHTTP(w, r.WithContext(ctx))
+</span>        })
+}
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">//go:build go1.22
+
+// Package httpapi provides primitives to interact with the openapi HTTP API.
+//
+// Code generated by github.com/oapi-codegen/oapi-codegen/v2 version v2.9.0 DO NOT EDIT.
+package httpapi
+
+import (
+        "bytes"
+        "context"
+        "fmt"
+        "net/http"
+        "time"
+
+        "github.com/oapi-codegen/runtime"
+)
+
+// CreateSnippetRequest defines model for CreateSnippetRequest.
+type CreateSnippetRequest struct {
+        Content       string `json:"content"`
+        ExpiresInDays int    `json:"expiresInDays"`
+        Title         string `json:"title"`
+}
+
+// Error defines model for Error.
+type Error struct {
+        Error string `json:"error"`
+}
+
+// Snippet defines model for Snippet.
+type Snippet struct {
+        Content string    `json:"content"`
+        Created time.Time `json:"created"`
+        Expires time.Time `json:"expires"`
+        ID      int64     `json:"id"`
+        Title   string    `json:"title"`
+}
+
+// ValidationError defines model for ValidationError.
+type ValidationError struct {
+        Errors map[string]string `json:"errors"`
+}
+
+// SnippetId defines model for SnippetId.
+type SnippetId = int64
+
+// BadRequest defines model for BadRequest.
+type BadRequest = Error
+
+// InternalError defines model for InternalError.
+type InternalError = Error
+
+// NotFound defines model for NotFound.
+type NotFound = Error
+
+// PayloadTooLarge defines model for PayloadTooLarge.
+type PayloadTooLarge = Error
+
+// UnsupportedMediaType defines model for UnsupportedMediaType.
+type UnsupportedMediaType = Error
+
+// CreateSnippetJSONRequestBody defines body for CreateSnippet for application/json ContentType.
+type CreateSnippetJSONRequestBody = CreateSnippetRequest
+
+// ServerInterface represents all server handlers.
+type ServerInterface interface {
+        // ListSnippets Every snippet, newest first.
+        // (GET /api/snippet)
+        ListSnippets(w http.ResponseWriter, r *http.Request)
+        // CreateSnippet Create one snippet.
+        // (POST /api/snippet)
+        CreateSnippet(w http.ResponseWriter, r *http.Request)
+        // DeleteSnippet Remove one snippet.
+        // (DELETE /api/snippet/{id})
+        DeleteSnippet(w http.ResponseWriter, r *http.Request, id SnippetId)
+        // GetSnippet One snippet.
+        // (GET /api/snippet/{id})
+        GetSnippet(w http.ResponseWriter, r *http.Request, id SnippetId)
+}
+
+// ServerInterfaceWrapper converts contexts to parameters.
+type ServerInterfaceWrapper struct {
+        Handler            ServerInterface
+        HandlerMiddlewares []MiddlewareFunc
+        ErrorHandlerFunc   func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListSnippets operation middleware
+func (siw *ServerInterfaceWrapper) ListSnippets(w http.ResponseWriter, r *http.Request) {
+
+        <span class="cov8" title="1">handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">siw.Handler.ListSnippets(w, r)
+</span>        }))
+
+        <span class="cov8" title="1">for _, middleware := range siw.HandlerMiddlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler)
+</span>        }
+
+        <span class="cov8" title="1">handler.ServeHTTP(w, r)</span>
+}
+
+// CreateSnippet operation middleware
+func (siw *ServerInterfaceWrapper) CreateSnippet(w http.ResponseWriter, r *http.Request) {
+
+        <span class="cov8" title="1">handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">siw.Handler.CreateSnippet(w, r)
+</span>        }))
+
+        <span class="cov8" title="1">for _, middleware := range siw.HandlerMiddlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler)
+</span>        }
+
+        <span class="cov8" title="1">handler.ServeHTTP(w, r)</span>
+}
+
+// DeleteSnippet operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSnippet(w http.ResponseWriter, r *http.Request) {
+
+        <span class="cov8" title="1">var err error
+        _ = err
+</span>
+        // ------------- Path parameter "id" -------------
+        <span class="cov8" title="1">var id SnippetId
+</span>
+        <span class="cov8" title="1">err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &amp;id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+        if err != nil </span>{
+                <span class="cov0" title="0">siw.ErrorHandlerFunc(w, r, &amp;InvalidParamFormatError{ParamName: "id", Err: err})
+                return
+</span>        }
+
+        <span class="cov8" title="1">handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">siw.Handler.DeleteSnippet(w, r, id)
+</span>        }))
+
+        <span class="cov8" title="1">for _, middleware := range siw.HandlerMiddlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler)
+</span>        }
+
+        <span class="cov8" title="1">handler.ServeHTTP(w, r)</span>
+}
+
+// GetSnippet operation middleware
+func (siw *ServerInterfaceWrapper) GetSnippet(w http.ResponseWriter, r *http.Request) {
+
+        <span class="cov8" title="1">var err error
+        _ = err
+</span>
+        // ------------- Path parameter "id" -------------
+        <span class="cov8" title="1">var id SnippetId
+</span>
+        <span class="cov8" title="1">err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &amp;id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+        if err != nil </span>{
+                <span class="cov8" title="1">siw.ErrorHandlerFunc(w, r, &amp;InvalidParamFormatError{ParamName: "id", Err: err})
+                return
+</span>        }
+
+        <span class="cov8" title="1">handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">siw.Handler.GetSnippet(w, r, id)
+</span>        }))
+
+        <span class="cov8" title="1">for _, middleware := range siw.HandlerMiddlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler)
+</span>        }
+
+        <span class="cov8" title="1">handler.ServeHTTP(w, r)</span>
+}
+
+type UnescapedCookieParamError struct {
+        ParamName string
+        Err       error
+}
+
+func (e *UnescapedCookieParamError) Error() string {
+        <span class="cov0" title="0">return fmt.Sprintf("error unescaping cookie parameter '%s'", e.ParamName)
+</span>}
+
+func (e *UnescapedCookieParamError) Unwrap() error {
+        <span class="cov0" title="0">return e.Err
+</span>}
+
+type UnmarshalingParamError struct {
+        ParamName string
+        Err       error
+}
+
+func (e *UnmarshalingParamError) Error() string {
+        <span class="cov0" title="0">return fmt.Sprintf("Error unmarshaling parameter %s as JSON: %s", e.ParamName, e.Err.Error())
+</span>}
+
+func (e *UnmarshalingParamError) Unwrap() error {
+        <span class="cov0" title="0">return e.Err
+</span>}
+
+type RequiredParamError struct {
+        ParamName string
+}
+
+func (e *RequiredParamError) Error() string {
+        <span class="cov0" title="0">return fmt.Sprintf("Query argument %s is required, but not found", e.ParamName)
+</span>}
+
+type RequiredHeaderError struct {
+        ParamName string
+        Err       error
+}
+
+func (e *RequiredHeaderError) Error() string {
+        <span class="cov0" title="0">return fmt.Sprintf("Header parameter %s is required, but not found", e.ParamName)
+</span>}
+
+func (e *RequiredHeaderError) Unwrap() error {
+        <span class="cov0" title="0">return e.Err
+</span>}
+
+type InvalidParamFormatError struct {
+        ParamName string
+        Err       error
+}
+
+func (e *InvalidParamFormatError) Error() string {
+        <span class="cov0" title="0">return fmt.Sprintf("Invalid format for parameter %s: %s", e.ParamName, e.Err.Error())
+</span>}
+
+func (e *InvalidParamFormatError) Unwrap() error {
+        <span class="cov8" title="1">return e.Err
+</span>}
+
+type TooManyValuesForParamError struct {
+        ParamName string
+        Count     int
+}
+
+func (e *TooManyValuesForParamError) Error() string {
+        <span class="cov0" title="0">return fmt.Sprintf("Expected one value for %s, got %d", e.ParamName, e.Count)
+</span>}
+
+// Handler creates http.Handler with routing matching OpenAPI spec.
+func Handler(si ServerInterface) http.Handler {
+        <span class="cov0" title="0">return HandlerWithOptions(si, StdHTTPServerOptions{})
+</span>}
+
+// ServeMux is an abstraction of [http.ServeMux].
+type ServeMux interface {
+        HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+        http.Handler
+}
+
+type StdHTTPServerOptions struct {
+        BaseURL          string
+        BaseRouter       ServeMux
+        Middlewares      []MiddlewareFunc
+        ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+// HandlerFromMux creates http.Handler with routing matching OpenAPI spec based on the provided mux.
+func HandlerFromMux(si ServerInterface, m ServeMux) http.Handler {
+        <span class="cov0" title="0">return HandlerWithOptions(si, StdHTTPServerOptions{
+                BaseRouter: m,
+        })
+</span>}
+
+func HandlerFromMuxWithBaseURL(si ServerInterface, m ServeMux, baseURL string) http.Handler {
+        <span class="cov0" title="0">return HandlerWithOptions(si, StdHTTPServerOptions{
+                BaseURL:    baseURL,
+                BaseRouter: m,
+        })
+</span>}
+
+// HandlerWithOptions creates http.Handler with additional options
+func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.Handler {
+        <span class="cov8" title="1">m := options.BaseRouter
+</span>
+        <span class="cov8" title="1">if m == nil </span>{
+                <span class="cov0" title="0">m = http.NewServeMux()
+</span>        }
+        <span class="cov8" title="1">if options.ErrorHandlerFunc == nil </span>{
+                <span class="cov0" title="0">options.ErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) </span>{
+                        <span class="cov0" title="0">http.Error(w, err.Error(), http.StatusBadRequest)
+</span>                }
+        }
+
+        <span class="cov8" title="1">wrapper := ServerInterfaceWrapper{
+                Handler:            si,
+                HandlerMiddlewares: options.Middlewares,
+                ErrorHandlerFunc:   options.ErrorHandlerFunc,
+</span>        }
+
+        <span class="cov8" title="1">m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/snippet", wrapper.ListSnippets)
+        m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/snippet", wrapper.CreateSnippet)
+        m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/snippet/{id}", wrapper.DeleteSnippet)
+        m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/snippet/{id}", wrapper.GetSnippet)
+</span>
+        <span class="cov8" title="1">return m</span>
+}
+
+type BadRequestJSONResponse Error
+
+type InternalErrorJSONResponse Error
+
+type NotFoundJSONResponse Error
+
+type PayloadTooLargeJSONResponse Error
+
+type UnsupportedMediaTypeJSONResponse Error
+
+type ValidationErrorJSONResponse ValidationError
+
+type ListSnippetsRequestObject struct {
+}
+
+type ListSnippetsResponseObject interface {
+        VisitListSnippetsResponse(w http.ResponseWriter) error
+}
+
+type ListSnippets200JSONResponse []Snippet
+
+func (response ListSnippets200JSONResponse) VisitListSnippetsResponse(w http.ResponseWriter) error {
+
+        <span class="cov8" title="1">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(200)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type ListSnippets500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response ListSnippets500JSONResponse) VisitListSnippetsResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.InternalErrorJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(500)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type CreateSnippetRequestObject struct {
+        Body *CreateSnippetJSONRequestBody
+}
+
+type CreateSnippetResponseObject interface {
+        VisitCreateSnippetResponse(w http.ResponseWriter) error
+}
+
+type CreateSnippet201ResponseHeaders struct {
+        Location *string
+}
+
+type CreateSnippet201JSONResponse struct {
+        Body    Snippet
+        Headers CreateSnippet201ResponseHeaders
+}
+
+func (response CreateSnippet201JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov8" title="1">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.Body); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        if response.Headers.Location != nil </span><span class="cov8" title="1"></span>{
+                {
+                        <span class="cov8" title="1">v, err := runtime.StyleParamWithOptions("simple", false, "Location", *response.Headers.Location, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+                        if err != nil </span>{
+                                <span class="cov0" title="0">return fmt.Errorf("error styling response header Location: %w", err)
+</span>                        }
+                        <span class="cov8" title="1">w.Header().Set("Location", v)</span>
+                }
+        }
+        <span class="cov8" title="1">w.WriteHeader(201)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type CreateSnippet400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateSnippet400JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.BadRequestJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(400)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type CreateSnippet413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response CreateSnippet413JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.PayloadTooLargeJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(413)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type CreateSnippet415JSONResponse struct {
+        UnsupportedMediaTypeJSONResponse
+}
+
+func (response CreateSnippet415JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.UnsupportedMediaTypeJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(415)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type CreateSnippet422JSONResponse struct{ ValidationErrorJSONResponse }
+
+func (response CreateSnippet422JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov8" title="1">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.ValidationErrorJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(422)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type CreateSnippet500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response CreateSnippet500JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.InternalErrorJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(500)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type DeleteSnippetRequestObject struct {
+        Id SnippetId `json:"id"`
+}
+
+type DeleteSnippetResponseObject interface {
+        VisitDeleteSnippetResponse(w http.ResponseWriter) error
+}
+
+type DeleteSnippet204Response struct {
+}
+
+func (response DeleteSnippet204Response) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
+        <span class="cov8" title="1">w.WriteHeader(204)
+        return nil
+</span>}
+
+type DeleteSnippet400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DeleteSnippet400JSONResponse) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.BadRequestJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(400)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type DeleteSnippet404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteSnippet404JSONResponse) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov8" title="1">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.NotFoundJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(404)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type DeleteSnippet500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response DeleteSnippet500JSONResponse) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.InternalErrorJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(500)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type GetSnippetRequestObject struct {
+        Id SnippetId `json:"id"`
+}
+
+type GetSnippetResponseObject interface {
+        VisitGetSnippetResponse(w http.ResponseWriter) error
+}
+
+type GetSnippet200JSONResponse Snippet
+
+func (response GetSnippet200JSONResponse) VisitGetSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov8" title="1">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(200)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type GetSnippet400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetSnippet400JSONResponse) VisitGetSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.BadRequestJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(400)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type GetSnippet404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetSnippet404JSONResponse) VisitGetSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov8" title="1">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.NotFoundJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(404)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+type GetSnippet500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetSnippet500JSONResponse) VisitGetSnippetResponse(w http.ResponseWriter) error {
+
+        <span class="cov0" title="0">var buf bytes.Buffer
+        if err := runtime.JSONMarshalWrite(&amp;buf, response.InternalErrorJSONResponse); err != nil </span>{
+                <span class="cov0" title="0">return err
+</span>        }
+        <span class="cov0" title="0">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(500)
+        _, err := buf.WriteTo(w)
+        return err</span>
+}
+
+// StrictServerInterface represents all server handlers.
+type StrictServerInterface interface {
+        // ListSnippets Every snippet, newest first.
+        // (GET /api/snippet)
+        ListSnippets(ctx context.Context, request ListSnippetsRequestObject) (ListSnippetsResponseObject, error)
+        // CreateSnippet Create one snippet.
+        // (POST /api/snippet)
+        CreateSnippet(ctx context.Context, request CreateSnippetRequestObject) (CreateSnippetResponseObject, error)
+        // DeleteSnippet Remove one snippet.
+        // (DELETE /api/snippet/{id})
+        DeleteSnippet(ctx context.Context, request DeleteSnippetRequestObject) (DeleteSnippetResponseObject, error)
+        // GetSnippet One snippet.
+        // (GET /api/snippet/{id})
+        GetSnippet(ctx context.Context, request GetSnippetRequestObject) (GetSnippetResponseObject, error)
+}
+
+// StrictHandlerFunc and StrictMiddlewareFunc are type aliases rather than
+// distinct named types, so middleware written against one generated package
+// can be shared with every other generated package using the same framework.
+type StrictHandlerFunc = func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
+type StrictMiddlewareFunc = func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
+
+type StrictHTTPServerOptions struct {
+        RequestErrorHandlerFunc  func(w http.ResponseWriter, r *http.Request, err error)
+        ResponseErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc) ServerInterface {
+        <span class="cov0" title="0">return &amp;strictHandler{ssi: ssi, middlewares: middlewares, options: StrictHTTPServerOptions{
+                RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) </span>{
+                        <span class="cov0" title="0">http.Error(w, err.Error(), http.StatusBadRequest)
+</span>                },
+                ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+                        <span class="cov0" title="0">http.Error(w, err.Error(), http.StatusInternalServerError)
+</span>                },
+        }}
+}
+
+func NewStrictHandlerWithOptions(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc, options StrictHTTPServerOptions) ServerInterface {
+        <span class="cov8" title="1">if options.RequestErrorHandlerFunc == nil </span>{
+                <span class="cov0" title="0">options.RequestErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) </span>{
+                        <span class="cov0" title="0">http.Error(w, err.Error(), http.StatusBadRequest)
+</span>                }
+        }
+        <span class="cov8" title="1">if options.ResponseErrorHandlerFunc == nil </span>{
+                <span class="cov0" title="0">options.ResponseErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) </span>{
+                        <span class="cov0" title="0">http.Error(w, err.Error(), http.StatusInternalServerError)
+</span>                }
+        }
+        <span class="cov8" title="1">return &amp;strictHandler{ssi: ssi, middlewares: middlewares, options: options}</span>
+}
+
+type strictHandler struct {
+        ssi         StrictServerInterface
+        middlewares []StrictMiddlewareFunc
+        options     StrictHTTPServerOptions
+}
+
+// ListSnippets operation middleware
+func (sh *strictHandler) ListSnippets(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">var request ListSnippetsRequestObject
+</span>
+        <span class="cov8" title="1">handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) </span>{
+                <span class="cov8" title="1">return sh.ssi.ListSnippets(ctx, request.(ListSnippetsRequestObject))
+</span>        }
+        <span class="cov8" title="1">for _, middleware := range sh.middlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler, "ListSnippets")
+</span>        }
+
+        <span class="cov8" title="1">response, err := handler(r.Context(), w, r, request)
+</span>
+        <span class="cov8" title="1">if err != nil </span>{
+                <span class="cov8" title="1">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>        } else <span class="cov8" title="1">if validResponse, ok := response.(ListSnippetsResponseObject); ok </span>{
+                <span class="cov8" title="1">if err := validResponse.VisitListSnippetsResponse(w); err != nil </span>{
+                        <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>                }
+        } else <span class="cov0" title="0">if response != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+</span>        }
+}
+
+// CreateSnippet operation middleware
+func (sh *strictHandler) CreateSnippet(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">var request CreateSnippetRequestObject
+</span>
+        <span class="cov8" title="1">var body CreateSnippetJSONRequestBody
+        if err := runtime.BindJSONBody(r, &amp;body); err != nil </span>{
+                <span class="cov8" title="1">sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+                return
+</span>        }
+        <span class="cov8" title="1">request.Body = &amp;body
+</span>
+        <span class="cov8" title="1">handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) </span>{
+                <span class="cov8" title="1">return sh.ssi.CreateSnippet(ctx, request.(CreateSnippetRequestObject))
+</span>        }
+        <span class="cov8" title="1">for _, middleware := range sh.middlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler, "CreateSnippet")
+</span>        }
+
+        <span class="cov8" title="1">response, err := handler(r.Context(), w, r, request)
+</span>
+        <span class="cov8" title="1">if err != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>        } else <span class="cov8" title="1">if validResponse, ok := response.(CreateSnippetResponseObject); ok </span>{
+                <span class="cov8" title="1">if err := validResponse.VisitCreateSnippetResponse(w); err != nil </span>{
+                        <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>                }
+        } else <span class="cov0" title="0">if response != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+</span>        }
+}
+
+// DeleteSnippet operation middleware
+func (sh *strictHandler) DeleteSnippet(w http.ResponseWriter, r *http.Request, id SnippetId) {
+        <span class="cov8" title="1">var request DeleteSnippetRequestObject
+</span>
+        <span class="cov8" title="1">request.Id = id
+</span>
+        <span class="cov8" title="1">handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) </span>{
+                <span class="cov8" title="1">return sh.ssi.DeleteSnippet(ctx, request.(DeleteSnippetRequestObject))
+</span>        }
+        <span class="cov8" title="1">for _, middleware := range sh.middlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler, "DeleteSnippet")
+</span>        }
+
+        <span class="cov8" title="1">response, err := handler(r.Context(), w, r, request)
+</span>
+        <span class="cov8" title="1">if err != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>        } else <span class="cov8" title="1">if validResponse, ok := response.(DeleteSnippetResponseObject); ok </span>{
+                <span class="cov8" title="1">if err := validResponse.VisitDeleteSnippetResponse(w); err != nil </span>{
+                        <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>                }
+        } else <span class="cov0" title="0">if response != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+</span>        }
+}
+
+// GetSnippet operation middleware
+func (sh *strictHandler) GetSnippet(w http.ResponseWriter, r *http.Request, id SnippetId) {
+        <span class="cov8" title="1">var request GetSnippetRequestObject
+</span>
+        <span class="cov8" title="1">request.Id = id
+</span>
+        <span class="cov8" title="1">handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) </span>{
+                <span class="cov8" title="1">return sh.ssi.GetSnippet(ctx, request.(GetSnippetRequestObject))
+</span>        }
+        <span class="cov8" title="1">for _, middleware := range sh.middlewares </span>{
+                <span class="cov0" title="0">handler = middleware(handler, "GetSnippet")
+</span>        }
+
+        <span class="cov8" title="1">response, err := handler(r.Context(), w, r, request)
+</span>
+        <span class="cov8" title="1">if err != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>        } else <span class="cov8" title="1">if validResponse, ok := response.(GetSnippetResponseObject); ok </span>{
+                <span class="cov8" title="1">if err := validResponse.VisitGetSnippetResponse(w); err != nil </span>{
+                        <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, err)
+</span>                }
+        } else <span class="cov0" title="0">if response != nil </span>{
+                <span class="cov0" title="0">sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+</span>        }
+}
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">// Package httpapi is the transport tier. It owns HTTP and nothing else: the
+// contract in openapi.gen.go parses parameters and bodies, this package maps
+// domain values to wire values and domain errors to documented status codes,
+// and everything else is delegated to the service.
+package httpapi
+
+import (
+        "encoding/json"
+        "net/http"
+
+        "github.com/saxeum/godough/internal/domain/snippet"
+)
+
+// toWire converts a stored snippet to the type the contract describes. It is a
+// hand-written mapping on purpose: the generated type is the wire format, and
+// keeping it separate from the domain means renaming a field in the spec is a
+// change to this file and the spec, not to the business rules.
+func toWire(in snippet.Snippet) Snippet {
+        <span class="cov8" title="1">return Snippet{
+                ID:      in.ID,
+                Title:   in.Title,
+                Content: in.Content,
+                Created: in.Created,
+                Expires: in.Expires,
+</span>        }
+}
+
+// toWireAll does the same for a list, allocating for the empty case so the
+// response is [] rather than null.
+func toWireAll(in []snippet.Snippet) []Snippet {
+        <span class="cov8" title="1">out := make([]Snippet, 0, len(in))
+        for _, item := range in </span>{
+                <span class="cov8" title="1">out = append(out, toWire(item))
+</span>        }
+        <span class="cov8" title="1">return out</span>
+}
+
+// errorBody is the shape every non-2xx response shares. It is the generated
+// Error type, so a change to the contract reaches this function.
+//
+// 4xx bodies say what the status says, which is what a client would print
+// anyway. A 5xx body says nothing useful on purpose: the cause is in the log,
+// where it has a request context and is not shown to the caller.
+func errorBody(status int) Error {
+        <span class="cov8" title="1">if status &gt;= 500 </span>{
+                <span class="cov8" title="1">return Error{Error: "internal server error"}
+</span>        }
+        <span class="cov8" title="1">return Error{Error: http.StatusText(status)}</span>
+}
+
+// writeJSON is the only way this package writes a non-generated body. Encoder,
+// not Marshal, so the bytes match what the generated response visitors emit.
+func writeJSON(w http.ResponseWriter, status int, body any) {
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(status)
+        _ = json.NewEncoder(w).Encode(body)
+</span>}
+</pre>
+		
+		<pre class="file" id="file11" style="display: none">package httpapi
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "log/slog"
+        "net/http"
+        "time"
+
+        "github.com/saxeum/godough/internal/domain/snippet"
+        "github.com/saxeum/godough/internal/service"
+)
+
+// Server implements StrictServerInterface, the generated interface that the
+// contract defines. A documented status code that no branch produces does not
+// compile, which is the reason to generate the interface rather than write the
+// handlers by hand.
+type Server struct {
+        log      *slog.Logger
+        snippets *service.SnippetService
+        // ready is the readiness check. It is a function rather than a pool so this
+        // package does not import a driver.
+        ready func(ctx context.Context) error
+}
+
+func NewServer(log *slog.Logger, snippets *service.SnippetService, ready func(ctx context.Context) error) *Server {
+        <span class="cov8" title="1">return &amp;Server{log: log, snippets: snippets, ready: ready}
+</span>}
+
+// Routes builds the mux. The generated handler is mounted on the same mux as the
+// probes, so there is one server and one set of routes; the API's paths carry
+// the /api prefix in the spec, so nothing is rewritten here.
+func (s *Server) Routes() http.Handler {
+        <span class="cov8" title="1">mux := http.NewServeMux()
+        mux.HandleFunc("GET /healthz", s.healthz)
+        mux.HandleFunc("GET /readyz", s.readyz)
+</span>
+        // Two callbacks, because the generated router fails in two places: a body
+        // that will not decode (strict options) and a path or query parameter that
+        // will not parse (the wrapper's own ErrorHandlerFunc). Both must answer in
+        // the API's JSON shape, or a malformed id is the only text/plain response
+        // the service ever sends.
+        <span class="cov8" title="1">badRequest := func(w http.ResponseWriter, r *http.Request, err error) </span>{
+                // MaxBytesReader cutting the body off is a 413, not the 400 a malformed
+                // body gets. Same callback, so the distinction has to be made here.
+                <span class="cov8" title="1">if isBodyTooLarge(err) </span>{
+                        <span class="cov8" title="1">s.log.Warn("request body too large", "limit", maxBodyBytes, "method", r.Method, "uri", r.URL.RequestURI())
+                        writeJSON(w, http.StatusRequestEntityTooLarge, errorBody(http.StatusRequestEntityTooLarge))
+                        return
+</span>                }
+                <span class="cov8" title="1">s.log.Warn("bad request", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
+                writeJSON(w, http.StatusBadRequest, errorBody(http.StatusBadRequest))</span>
+        }
+
+        <span class="cov8" title="1">strict := NewStrictHandlerWithOptions(s, nil, StrictHTTPServerOptions{
+                RequestErrorHandlerFunc: badRequest,
+                // A handler returned an error: only unexpected failures reach here, since
+                // the documented ones are returned as response objects.
+                ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) </span>{
+                        // A client that hung up is not a fault. Writing to its connection is
+                        // pointless and logging it at ERROR makes the error rate measure
+                        // browsers navigating away rather than anything going wrong.
+                        <span class="cov8" title="1">if errors.Is(err, context.Canceled) </span>{
+                                <span class="cov8" title="1">s.log.Info("request abandoned by the client", "method", r.Method, "uri", r.URL.RequestURI())
+                                return
+</span>                        }
+                        // A request that ran out of its own deadline is the server's failure,
+                        // not the client's, so it stays a 500 — with the distinction in the
+                        // log, because "deadline exceeded" alone does not say which deadline.
+                        <span class="cov8" title="1">if errors.Is(err, context.DeadlineExceeded) </span>{
+                                <span class="cov0" title="0">s.log.Error("request deadline exceeded", "err", err, "timeout", RequestTimeout, "method", r.Method, "uri", r.URL.RequestURI())
+                                writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))
+                                return
+</span>                        }
+                        <span class="cov8" title="1">s.log.Error("server error", "err", err, "method", r.Method, "uri", r.URL.RequestURI())
+                        writeJSON(w, http.StatusInternalServerError, errorBody(http.StatusInternalServerError))</span>
+                },
+        })
+
+        <span class="cov8" title="1">api := HandlerWithOptions(strict, StdHTTPServerOptions{
+                BaseRouter:       mux,
+                ErrorHandlerFunc: badRequest,
+        })
+</span>
+        // Outside, not inside: the generated handler reads the body before any of its
+        // own middleware sees the request. Outermost first, so a panic anywhere below
+        // is recovered, and the deadline covers everything that follows.
+        <span class="cov8" title="1">return recoverer(s.log, requestDeadline(RequestTimeout, bodyGuards(api)))</span>
+}
+
+// healthz says the process is alive. It must not touch the database: a database
+// blip is not a reason to restart the container.
+func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
+        <span class="cov8" title="1">_, _ = w.Write([]byte("ok\n"))
+</span>}
+
+// readyz says the server can serve real traffic, so it does touch the database.
+func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+        defer cancel()
+</span>
+        <span class="cov8" title="1">if err := s.ready(ctx); err != nil </span>{
+                <span class="cov8" title="1">s.log.Error("readiness check failed", "err", err)
+                writeJSON(w, http.StatusServiceUnavailable, errorBody(http.StatusServiceUnavailable))
+                return
+</span>        }
+
+        <span class="cov8" title="1">_, _ = w.Write([]byte("ok\n"))</span>
+}
+
+// ListSnippets implements GET /api/snippet.
+func (s *Server) ListSnippets(ctx context.Context, _ ListSnippetsRequestObject) (ListSnippetsResponseObject, error) {
+        <span class="cov8" title="1">items, err := s.snippets.List(ctx)
+        if err != nil </span>{
+                <span class="cov8" title="1">return nil, err
+</span>        }
+        <span class="cov8" title="1">return ListSnippets200JSONResponse(toWireAll(items)), nil</span>
+}
+
+// GetSnippet implements GET /api/snippet/{id}.
+func (s *Server) GetSnippet(ctx context.Context, request GetSnippetRequestObject) (GetSnippetResponseObject, error) {
+        <span class="cov8" title="1">item, err := s.snippets.Get(ctx, request.Id)
+        switch </span>{
+        case errors.Is(err, snippet.ErrNotFound):
+                <span class="cov8" title="1">return GetSnippet404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse(errorBody(http.StatusNotFound))}, nil</span>
+        case err != nil:
+                <span class="cov0" title="0">return nil, err</span>
+        }
+        <span class="cov8" title="1">return GetSnippet200JSONResponse(toWire(item)), nil</span>
+}
+
+// CreateSnippet implements POST /api/snippet.
+func (s *Server) CreateSnippet(ctx context.Context, request CreateSnippetRequestObject) (CreateSnippetResponseObject, error) {
+        <span class="cov8" title="1">created, err := s.snippets.Create(ctx, snippet.New{
+                Title:         request.Body.Title,
+                Content:       request.Body.Content,
+                ExpiresInDays: request.Body.ExpiresInDays,
+        })
+</span>
+        <span class="cov8" title="1">var invalid *snippet.ValidationError
+        switch </span>{
+        case errors.As(err, &amp;invalid):
+                <span class="cov8" title="1">return CreateSnippet422JSONResponse{
+                        ValidationErrorJSONResponse: ValidationErrorJSONResponse{Errors: invalid.Fields},
+                }, nil</span>
+        case err != nil:
+                <span class="cov0" title="0">return nil, err</span>
+        }
+
+        <span class="cov8" title="1">s.log.Info("snippet created", "id", created.ID)
+        location := fmt.Sprintf("/api/snippet/%d", created.ID)
+        return CreateSnippet201JSONResponse{
+                Body:    toWire(created),
+                Headers: CreateSnippet201ResponseHeaders{Location: &amp;location},
+        }, nil</span>
+}
+
+// DeleteSnippet implements DELETE /api/snippet/{id}.
+func (s *Server) DeleteSnippet(ctx context.Context, request DeleteSnippetRequestObject) (DeleteSnippetResponseObject, error) {
+        <span class="cov8" title="1">err := s.snippets.Delete(ctx, request.Id)
+        switch </span>{
+        case errors.Is(err, snippet.ErrNotFound):
+                <span class="cov8" title="1">return DeleteSnippet404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse(errorBody(http.StatusNotFound))}, nil</span>
+        case err != nil:
+                <span class="cov0" title="0">return nil, err</span>
+        }
+
+        <span class="cov8" title="1">s.log.Info("snippet deleted", "id", request.Id)
+        return DeleteSnippet204Response{}, nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

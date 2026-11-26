@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -70,8 +71,7 @@ func validate(in snippet.New) map[string]string {
 	case strings.TrimSpace(in.Title) == "":
 		bad["title"] = "is required"
 	case utf8.RuneCountInString(in.Title) > snippet.TitleMaxRunes:
-		// varchar(100) counts characters, not bytes.
-		bad["title"] = "must be at most 100 characters"
+		bad["title"] = fmt.Sprintf("must be at most %d characters", snippet.TitleMaxRunes)
 	}
 
 	if strings.TrimSpace(in.Content) == "" {
@@ -79,7 +79,7 @@ func validate(in snippet.New) map[string]string {
 	}
 
 	if in.ExpiresInDays < snippet.ExpiryMinDays || in.ExpiresInDays > snippet.ExpiryMaxDays {
-		bad["expiresInDays"] = "must be between 1 and 365"
+		bad["expiresInDays"] = fmt.Sprintf("must be between %d and %d", snippet.ExpiryMinDays, snippet.ExpiryMaxDays)
 	}
 
 	return bad
