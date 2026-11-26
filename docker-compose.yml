@@ -20,7 +20,9 @@ services:
     build: .
     environment:
       SNIPPET_ADDR: ":4000"
-      # In compose the database is the service name, not localhost.
+      # In compose the database is the service name, not localhost. This is the
+      # one network where plaintext Postgres is deliberate: the container has no
+      # TLS certificate, and the network is local. Everywhere else verify-full.
       DATABASE_URL: postgres://godough_app:snippet_app@postgres:5432/snippet?sslmode=disable
       # The UI is same-origin through the LB; the Vite dev server is not used
       # inside compose. Keep this list explicit rather than wildcarded.
