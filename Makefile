@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig charts-lint
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -212,6 +212,26 @@ rds-psql: ## [host] psql to RDS through the running rds-tunnel
 	 password=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id "$$secret" --query SecretString --output text | jq -r .password); \
 	 endpoint=$$(terraform -chdir=$(TF_DATA) output -raw rds_endpoint | cut -d: -f1); \
 	 PGPASSWORD="$$password" psql "host=$$endpoint hostaddr=127.0.0.1 port=15432 dbname=godough user=godough sslmode=verify-full sslrootcert=global-bundle.pem" $(PSQL_ARGS)
+
+# Pinned like the Trivy image, and run through Docker so the host needs no Helm.
+HELM := docker run --rm -v $(CURDIR):/apps -w /apps alpine/helm:4.0.0
+CHARTS := deploy/charts/api deploy/charts/ui
+# A placeholder digest: 64 hex characters, so the rendered manifests are the
+# shape a real one produces. The charts refuse to render without one.
+CHART_RENDER_ARGS := --set image.repository=registry.example/godough --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+charts-lint: ## [host] Lint and render both charts, and check the digest guard
+	@for c in $(CHARTS); do \
+	  $(HELM) lint $$c $(CHART_RENDER_ARGS) >/dev/null || exit 1; \
+	  $(HELM) template $$(basename $$c) $$c $(CHART_RENDER_ARGS) >/dev/null || exit 1; \
+	  echo "ok $$c"; \
+	done
+	@# A chart that renders without a digest deploys a moving tag, so the guard
+	@# is part of the gate rather than a nicety.
+	@if $(HELM) template no-digest $(firstword $(CHARTS)) --set image.repository=registry.example/godough >/dev/null 2>&1; then \
+	  echo "a chart rendered without image.digest: the guard is gone"; exit 1; \
+	fi
+	@echo "ok the digest guard still fails without a digest"
 
 eks-tunnel: ## [host] Forward the private EKS API to localhost:6443 through SSM
 	@command -v session-manager-plugin >/dev/null || { echo "session-manager-plugin is not installed"; exit 1; }
