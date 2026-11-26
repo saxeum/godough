@@ -22,6 +22,9 @@ services:
       SNIPPET_ADDR: ":4000"
       # In compose the database is the service name, not localhost.
       DATABASE_URL: postgres://godough_app:snippet_app@postgres:5432/snippet?sslmode=disable
+      # The UI is same-origin through the LB; the Vite dev server is not used
+      # inside compose. Keep this list explicit rather than wildcarded.
+      TRUSTED_ORIGINS: http://localhost:8080
     ports:
       - "127.0.0.1:4000:4000"
     depends_on:

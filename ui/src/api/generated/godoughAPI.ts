@@ -11,6 +11,9 @@
  * means restating this routing table in code that can then disagree with it.
  * Treat those bodies as opaque; the status code is the whole message.
  *
+ * Every `/api/snippet` request requires a live session cookie. State-changing
+ * requests also require an `Origin` in the configured trusted list.
+ *
  * OpenAPI spec version: 1
  */
 import type {

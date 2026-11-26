@@ -17,15 +17,29 @@ import (
 // compile, which is the reason to generate the interface rather than write the
 // handlers by hand.
 type Server struct {
-	log      *slog.Logger
-	snippets *service.Snippets
+	log            *slog.Logger
+	snippets       *service.Snippets
+	sessions       SessionService
+	trustedOrigins []string
 	// ready is the readiness check. It is a function rather than a pool so this
 	// package does not import a driver.
 	ready func(ctx context.Context) error
 }
 
-func NewServer(log *slog.Logger, snippets *service.Snippets, ready func(ctx context.Context) error) *Server {
-	return &Server{log: log, snippets: snippets, ready: ready}
+func NewServer(
+	log *slog.Logger,
+	snippets *service.Snippets,
+	sessions SessionService,
+	trustedOrigins []string,
+	ready func(ctx context.Context) error,
+) *Server {
+	return &Server{
+		log:            log,
+		snippets:       snippets,
+		sessions:       sessions,
+		trustedOrigins: trustedOrigins,
+		ready:          ready,
+	}
 }
 
 // Routes builds the mux. The generated handler is mounted on the same mux as the
@@ -78,15 +92,24 @@ func (s *Server) Routes() http.Handler {
 		},
 	})
 
+	// The snippet routes are the only protected ones. A small mux lets the
+	// session and origin checks wrap exactly those paths, while the probes stay
+	// public and the generated router keeps its own route table.
+	snippetMux := http.NewServeMux()
 	api := HandlerWithOptions(strict, StdHTTPServerOptions{
-		BaseRouter:       mux,
+		BaseRouter:       snippetMux,
 		ErrorHandlerFunc: badRequest,
 	})
+
+	protected := requireSession(s.sessions, s.log,
+		requireTrustedOrigin(s.trustedOrigins, s.log, bodyGuards(api)))
+	mux.Handle("/api/snippet", protected)
+	mux.Handle("/api/snippet/", protected)
 
 	// Outside, not inside: the generated handler reads the body before any of its
 	// own middleware sees the request. Outermost first, so a panic anywhere below
 	// is recovered, and the deadline covers everything that follows.
-	return withRequestID(accessLog(s.log, recoverer(s.log, requestDeadline(RequestTimeout, bodyGuards(api)))))
+	return withRequestID(accessLog(s.log, recoverer(s.log, requestDeadline(RequestTimeout, mux))))
 }
 
 // healthz says the process is alive. It must not touch the database: a database

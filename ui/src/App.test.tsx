@@ -48,6 +48,18 @@ describe('App', () => {
     expect(screen.getByText(snippet.content)).toBeInTheDocument()
   })
 
+  it('renders the signed-out state on a 401', async () => {
+    mockedList.mockRejectedValue(new ApiError(401))
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Sign in required.')).toBeInTheDocument()
+  })
+
   it('renders the not-found state on a 404', async () => {
     mockedGet.mockRejectedValue(new ApiError(404))
 

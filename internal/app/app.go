@@ -82,7 +82,13 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 
 	repo := postgres.NewSnippetRepository(db)
 	svc := service.NewSnippets(repo)
-	handler := httpapi.NewServer(log, svc, db.Ping).Routes()
+	sessions := service.NewSessions(postgres.NewSessionRepository(db))
+	if n, err := sessions.DeleteExpired(ctx); err != nil {
+		log.Warn("expired session cleanup failed", "err", err)
+	} else if n > 0 {
+		log.Info("expired sessions removed", "count", n)
+	}
+	handler := httpapi.NewServer(log, svc, sessions, cfg.TrustedOrigins, db.Ping).Routes()
 
 	return &App{
 		log: log,

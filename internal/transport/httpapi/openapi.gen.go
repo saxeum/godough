@@ -47,6 +47,9 @@ type SnippetId = int64
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
 
+// Forbidden defines model for Forbidden.
+type Forbidden = Error
+
 // InternalError defines model for InternalError.
 type InternalError = Error
 
@@ -55,6 +58,9 @@ type NotFound = Error
 
 // PayloadTooLarge defines model for PayloadTooLarge.
 type PayloadTooLarge = Error
+
+// Unauthorized defines model for Unauthorized.
+type Unauthorized = Error
 
 // UnsupportedMediaType defines model for UnsupportedMediaType.
 type UnsupportedMediaType = Error
@@ -297,11 +303,15 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 type BadRequestJSONResponse Error
 
+type ForbiddenJSONResponse Error
+
 type InternalErrorJSONResponse Error
 
 type NotFoundJSONResponse Error
 
 type PayloadTooLargeJSONResponse Error
+
+type UnauthorizedJSONResponse Error
 
 type UnsupportedMediaTypeJSONResponse Error
 
@@ -324,6 +334,20 @@ func (response ListSnippets200JSONResponse) VisitListSnippetsResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSnippets401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListSnippets401JSONResponse) VisitListSnippetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.UnauthorizedJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -390,6 +414,34 @@ func (response CreateSnippet400JSONResponse) VisitCreateSnippetResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSnippet401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response CreateSnippet401JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.UnauthorizedJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSnippet403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateSnippet403JSONResponse) VisitCreateSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.ForbiddenJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -482,6 +534,34 @@ func (response DeleteSnippet400JSONResponse) VisitDeleteSnippetResponse(w http.R
 	return err
 }
 
+type DeleteSnippet401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeleteSnippet401JSONResponse) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.UnauthorizedJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSnippet403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteSnippet403JSONResponse) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.ForbiddenJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeleteSnippet404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response DeleteSnippet404JSONResponse) VisitDeleteSnippetResponse(w http.ResponseWriter) error {
@@ -542,6 +622,20 @@ func (response GetSnippet400JSONResponse) VisitGetSnippetResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSnippet401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetSnippet401JSONResponse) VisitGetSnippetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := runtime.JSONMarshalWrite(&buf, response.UnauthorizedJSONResponse); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
 }
