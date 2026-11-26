@@ -18,6 +18,19 @@ GENERATED := internal/transport/httpapi/openapi.gen.go ui/src/api/generated
 # How many modules to show in `make symbols`.
 N ?= 20
 
+# Coverage. `make cover` reads a different number from `make test`, on purpose.
+#
+# -coverpkg=./... instruments every package in every test binary, so a line
+# exercised by another package's test counts. Without it, internal/app reported
+# New and Run at 0.0% while cmd/web's lifecycle test was running both.
+#
+# The generated contract is then filtered out: 613 lines nobody writes, with no
+# branch in them that can be wrong. Leaving it in put the total at 68.0% instead
+# of 85.8% and made the transport look a third worse than it is.
+COVER_PROFILE  := coverage.out
+COVER_FILTERED := coverage.filtered.out
+COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
+
 # Every target says where it runs, in the text `make help` prints:
 #
 #   [host]    a process on your machine, reading .env
@@ -28,7 +41,7 @@ N ?= 20
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate codegen codegen-go codegen-ts codegen-check
+.PHONY: help build run ui-install ui-dev ui-build test test-unit e2e cover cover-raw vet vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-migrate codegen codegen-go codegen-ts codegen-check
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -137,9 +150,14 @@ test-unit: ## [host] Fast tests, no database, no .env (-short)
 test: ## [both] All tests, including the database (needs make db-up db-migrate)
 	$(LOAD_ENV) && go test -count=1 -v -cover ./...
 
-cover: ## [both] HTML coverage report from the full test run
-	$(LOAD_ENV) && go test -count=1 -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
+cover: ## [both] HTML coverage report: cross-package counted, generated code excluded
+	$(LOAD_ENV) && go test -count=1 -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
+	@grep -v "$(COVER_GENERATED)" $(COVER_PROFILE) > $(COVER_FILTERED) || true
+	@go tool cover -func=$(COVER_FILTERED) | tail -1
+	go tool cover -html=$(COVER_FILTERED) -o coverage.html
+
+cover-raw: cover ## [both] The same run, unfiltered: generated code included
+	go tool cover -html=$(COVER_PROFILE) -o coverage-raw.html
 
 # ---- docker -------------------------------------------------------------
 

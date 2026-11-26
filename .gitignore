@@ -6,7 +6,7 @@
 
 # Coverage reports (make test, make cover)
 *.out
-coverage.html
+coverage*.html
 
 # Compiled artefacts
 *.exe
