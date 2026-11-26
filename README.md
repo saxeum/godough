@@ -291,8 +291,9 @@ make ecr-pull-test
 ```
 
 `ECR_REGISTRY` defaults to `<account>.dkr.ecr.<region>.amazonaws.com` from the
-current AWS credentials, and `TAG` defaults to `git rev-parse HEAD`. Override
-either only when you need to.
+current AWS credentials. `TAG` overrides both; otherwise `ecr-push` uses
+`git rev-parse HEAD` and `ecr-pull-test` uses the last published `origin/master`
+commit.
 
 `ecr-pull-test` pulls the pushed images back, starts the compose stack from them and runs `make e2e`.
 

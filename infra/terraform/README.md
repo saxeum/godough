@@ -48,8 +48,8 @@ Outputs:
 make ecr-push
 ```
 
-`ECR_REGISTRY` is derived from STS when unset; `TAG` defaults to the current
-commit. Override them for a specific image or another account.
+`ECR_REGISTRY` is derived from STS when unset. `TAG` overrides both; otherwise
+`ecr-push` uses the current commit and `ecr-pull-test` uses `origin/master`.
 
 `make ecr-build` and `make ecr-login` are separate steps. The tag is the commit SHA; there is no `latest`. The CI `publish` job runs the same `make ecr-push` after `test` and `e2e`, only on `master`, using OIDC and the role above.
 
