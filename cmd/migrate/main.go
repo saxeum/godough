@@ -1,5 +1,5 @@
 // Command migrate applies every pending embedded migration, in order, recording
-// each in schema_migrations.
+// each in schema_migrations. With -status it reports instead of writing.
 //
 // It runs as the owner, because migrations create tables and the application
 // role owns nothing. The DSN comes from DATABASE_URL_OWNER rather than
@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -24,13 +25,16 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	status := flag.Bool("status", false, "print applied, pending and changed migrations without writing anything")
+	flag.Parse()
+
+	if err := run(*status); err != nil {
 		fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(status bool) error {
 	dsn := os.Getenv("DATABASE_URL_OWNER")
 	if dsn == "" {
 		return fmt.Errorf("DATABASE_URL_OWNER is not set: migrations run as the owner, not as the application role")
@@ -59,18 +63,48 @@ func run() error {
 		return fmt.Errorf("ping database: %w", err)
 	}
 
-	applied, err := migrate.Apply(ctx, pool, all)
+	if status {
+		report, err := migrate.Status(ctx, pool, all)
+		if err != nil {
+			return err
+		}
+		printStatus(report)
+		return nil
+	}
+
+	report, err := migrate.Apply(ctx, pool, all)
 	if err != nil {
 		return err
 	}
-
-	if len(applied) == 0 {
-		fmt.Printf("nothing to apply; %d migration(s) already recorded\n", len(all))
-		return nil
-	}
-	for _, m := range applied {
-		fmt.Printf("applied %s\n", m.Name)
-	}
+	printApplied(report, len(all))
 
 	return nil
+}
+
+func printStatus(r migrate.Report) {
+	for _, m := range r.Applied {
+		fmt.Printf("applied  %s\n", m.Name)
+	}
+	for _, m := range r.Pending {
+		fmt.Printf("pending  %s\n", m.Name)
+	}
+	for _, m := range r.Changed {
+		fmt.Printf("changed  %s\n", m.Name)
+	}
+
+	fmt.Printf("%d applied, %d pending, %d changed\n", len(r.Applied), len(r.Pending), len(r.Changed))
+}
+
+func printApplied(r migrate.Report, total int) {
+	for _, m := range r.Backfilled {
+		fmt.Printf("recorded checksum for %s (applied before checksums existed)\n", m.Name)
+	}
+
+	if len(r.Applied) == 0 {
+		fmt.Printf("nothing to apply; %d migration(s) already recorded\n", total)
+		return
+	}
+	for _, m := range r.Applied {
+		fmt.Printf("applied %s\n", m.Name)
+	}
 }
