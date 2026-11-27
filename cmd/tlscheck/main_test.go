@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 	"time"
 )
 
@@ -72,5 +74,31 @@ func TestReadCertFileReadsOneCertificate(t *testing.T) {
 	}
 	if len(certs) != 1 || certs[0].Subject.CommonName != "tlscheck-test" {
 		t.Fatalf("certs = %+v", certs)
+	}
+}
+
+// The deployment DSN carries pool_max_conns, and pgx sends an unknown keyword to
+// the server as a runtime parameter. Against RDS that is fatal, so this has to be
+// the pool's parser. The negative control is the connection parser, which does
+// forward it: that is the bug this function exists to avoid.
+func TestConnConfigDoesNotSendPoolParametersToTheServer(t *testing.T) {
+	dsn := "postgres://user:pass@example.com:5432/db?sslmode=verify-full&pool_max_conns=5&pool_max_conn_lifetime=30m"
+
+	cfg, err := connConfig(dsn)
+	if err != nil {
+		t.Fatalf("connConfig: %v", err)
+	}
+	for _, key := range []string{"pool_max_conns", "pool_max_conn_lifetime"} {
+		if _, sent := cfg.RuntimeParams[key]; sent {
+			t.Errorf("%s would be sent to the server as a runtime parameter", key)
+		}
+	}
+
+	connCfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("pgx.ParseConfig: %v", err)
+	}
+	if _, sent := connCfg.RuntimeParams["pool_max_conns"]; !sent {
+		t.Skip("pgx no longer forwards unknown keywords; this comment can be simplified")
 	}
 }

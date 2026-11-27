@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -30,6 +31,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "tls-check: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// connConfig parses the DSN with the pool's parser, not the connection's. The
+// deployment DSN carries pool_max_conns so the connection budget is not a guess,
+// and pgx treats an unknown keyword as a server runtime parameter. Against RDS
+// that is a hard failure — `FATAL: unrecognized configuration parameter
+// "pool_max_conns"` — so a check that passes from a laptop with a bare DSN does
+// not work where it matters.
+func connConfig(dsn string) (*pgx.ConnConfig, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+
+	return cfg.ConnConfig, nil
 }
 
 func run(minDays int) error {
@@ -70,7 +86,12 @@ func run(minDays int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(ctx, dsn)
+	cfg, err := connConfig(dsn)
+	if err != nil {
+		return err
+	}
+
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", u.Host, err)
 	}
