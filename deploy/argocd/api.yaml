@@ -61,10 +61,12 @@ spec:
   syncPolicy:
     syncOptions:
       - CreateNamespace=false
-    # prune stays off until Argo has been the only writer for a while: a
-    # mis-typed values key should not delete an Ingress.
+    # On, now that Terraform no longer describes these objects: there is exactly
+    # one writer, so drift means someone changed the cluster by hand and the answer
+    # is to put it back. Prune stays off until Argo has been the only writer long
+    # enough to trust a mis-typed values key not to delete an Ingress.
     automated:
       prune: false
-      selfHeal: false
+      selfHeal: true
 
   revisionHistoryLimit: 3
