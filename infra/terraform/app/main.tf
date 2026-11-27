@@ -14,6 +14,12 @@ locals {
       enabled        = true
       host           = var.domain
       certificateArn = aws_acm_certificate_validation.edge.certificate_arn
+      # The bucket name is a deployment fact, so it is a value here rather than a
+      # constant in the chart (#171).
+      accessLogs = {
+        bucket = aws_s3_bucket.alb_logs.id
+        prefix = "godough"
+      }
     }
     # The Secrets are created by `make rds-app-password` and the sync that #125
     # decides on; the chart only names them.
@@ -39,6 +45,12 @@ locals {
       enabled        = true
       host           = var.domain
       certificateArn = aws_acm_certificate_validation.edge.certificate_arn
+      # The bucket name is a deployment fact, so it is a value here rather than a
+      # constant in the chart (#171).
+      accessLogs = {
+        bucket = aws_s3_bucket.alb_logs.id
+        prefix = "godough"
+      }
     }
   }
 }
@@ -57,7 +69,9 @@ resource "helm_release" "api" {
   wait    = true
   timeout = 300
 
-  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge]
+  # The policy, not just the bucket: the listener is told to write before the
+  # bucket would accept it otherwise, and the first logs would be a silent 403.
+  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge, aws_s3_bucket_policy.alb_logs]
 }
 
 resource "helm_release" "ui" {
@@ -71,7 +85,7 @@ resource "helm_release" "ui" {
   wait    = true
   timeout = 300
 
-  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge, helm_release.api]
+  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge, helm_release.api, aws_s3_bucket_policy.alb_logs]
 }
 
 # ---- AWS Load Balancer Controller ------------------------------------------
@@ -239,4 +253,128 @@ resource "cloudflare_dns_record" "edge" {
   content = var.alb_hostname
   ttl     = 300
   proxied = false
+}
+
+# ---- ALB access logs -------------------------------------------------------
+#
+# The ALB keeps no record of what hit it, so a flood takes the site down and leaves
+# nothing behind to say who sent it, from where, or how much (#171). Request volume
+# is the input a rate limit or a WAF rule needs, and there is no other place to get
+# it.
+#
+# SSE-S3, not the customer KMS key the state bucket uses: ALB access logs do not
+# support SSE-KMS with a customer-managed key. This is the one bucket in the account
+# that is not on the KMS pattern, and the exception is deliberate.
+
+resource "aws_s3_bucket" "alb_logs" {
+  bucket = "${var.project}-alb-logs-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_public_access_block" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# ObjectWriter rather than BucketOwnerEnforced: the delivery service writes the
+# object and asks for bucket-owner-full-control, which only does anything while
+# ACLs are enabled. Public access stays blocked either way, and the policy below is
+# the only grant.
+resource "aws_s3_bucket_ownership_controls" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    object_ownership = "ObjectWriter"
+  }
+}
+
+# `iac` flags this bucket as AWS-0132: SSE-S3 where the rule wants a customer
+# managed key. The restriction trivy cites ("SSE-KMS is not supported for S3
+# server access logging destination buckets") is about a different feature — S3
+# server access logs — and whether ALB log delivery accepts a CMK is **not
+# established here**. Suppressed so the logs can ship; the experiment that would
+# remove it is #176, and the reason to expect it might work is that the delivery
+# principal is named explicitly in the policy below and could be granted the key.
+#trivy:ignore:AWS-0132
+resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Thirty days, hardcoded rather than a variable: at this traffic it is a few
+# megabytes, and a knob with one value is a constant someone else has to read.
+resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    id     = "expire-logs"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+}
+
+data "aws_iam_policy_document" "alb_logs" {
+  # The service principal, not the region's log-delivery account id: the id is a
+  # number that goes stale in the next region, and this is the form AWS documents
+  # for load balancer access logs.
+  statement {
+    sid    = "ELBAccessLogs"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
+    }
+
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.alb_logs.arn}/godough/AWSLogs/${data.aws_caller_identity.current.account_id}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+  }
+
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.alb_logs.arn, "${aws_s3_bucket.alb_logs.arn}/*"]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "alb_logs" {
+  bucket     = aws_s3_bucket.alb_logs.id
+  policy     = data.aws_iam_policy_document.alb_logs.json
+  depends_on = [aws_s3_bucket_public_access_block.alb_logs]
 }
