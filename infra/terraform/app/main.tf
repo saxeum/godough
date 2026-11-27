@@ -291,6 +291,11 @@ resource "aws_s3_bucket_ownership_controls" "alb_logs" {
   }
 }
 
+# A customer-managed key is not available here: load balancer access log delivery
+# accepts SSE-S3 or the AWS-managed key for the service, not a CMK from the
+# account. The finding is correct and cannot be satisfied, so it is suppressed
+# with the reason in front of it rather than silently accepted.
+#trivy:ignore:AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
   bucket = aws_s3_bucket.alb_logs.id
 
