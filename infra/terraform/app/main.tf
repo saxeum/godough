@@ -291,10 +291,13 @@ resource "aws_s3_bucket_ownership_controls" "alb_logs" {
   }
 }
 
-# A customer-managed key is not available here: load balancer access log delivery
-# accepts SSE-S3 or the AWS-managed key for the service, not a CMK from the
-# account. The finding is correct and cannot be satisfied, so it is suppressed
-# with the reason in front of it rather than silently accepted.
+# `iac` flags this bucket as AWS-0132: SSE-S3 where the rule wants a customer
+# managed key. The restriction trivy cites ("SSE-KMS is not supported for S3
+# server access logging destination buckets") is about a different feature — S3
+# server access logs — and whether ALB log delivery accepts a CMK is **not
+# established here**. Suppressed so the logs can ship; the experiment that would
+# remove it is #176, and the reason to expect it might work is that the delivery
+# principal is named explicitly in the policy below and could be granted the key.
 #trivy:ignore:AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
   bucket = aws_s3_bucket.alb_logs.id
