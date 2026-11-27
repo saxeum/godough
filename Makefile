@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests check-argocd argocd-seed argocd-forward argocd-password argocd-login argocd-apps argocd-diff
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests check-argocd argocd-verify argocd-seed argocd-forward argocd-password argocd-login argocd-apps argocd-diff
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -303,6 +303,9 @@ argocd-apps: ## [host] Applications with their sync state and health (needs make
 	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
 	@kubectl -n $(ARGOCD_NAMESPACE) get applications \
 	  -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
+
+argocd-verify: ## [host] Assert every Application is Synced/Healthy and every pod runs the digest the values file names (needs make eks-tunnel)
+	./deploy/argocd/verify.sh
 
 check-argocd: ## [host] Render the pinned Argo CD chart with its values, and check the pin agrees with Terraform
 	./deploy/argocd/install/check.sh
