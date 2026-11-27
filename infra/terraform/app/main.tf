@@ -358,16 +358,17 @@ resource "aws_wafv2_web_acl" "edge" {
     }
   }
 
-  # The number is measured, not chosen: the access logs from #171 showed 49
-  # requests in 36 minutes across 26 addresses, with a busiest window of **6
-  # requests per address per five minutes**. 100 is sixteen times that, which
-  # leaves room for a browser loading the page a few times and still stops a
-  # sustained flood from one address. The sample is small — one hour of a staging
-  # site — so this is a floor with a stated margin, not a finding; revisit it when
-  # the logs have a week in them.
+  # The anonymous half, keyed on the address the ALB saw.
   #
-  # Scoped to /api/ because that is the only path that costs a database round
-  # trip before it can be refused; the SPA's assets are cached and cheap.
+  # The number comes from the access logs (#171) over the first 4.5 hours: 235
+  # requests from 99 addresses, a busiest legitimate window of **9 per address per
+  # five minutes**, and 32 when a test deliberately burst one. 100 is ten times the
+  # legitimate peak, which leaves room for a browser reloading the page and still
+  # cuts off a sustained flood. It is a floor with a stated margin, not a
+  # measurement of what a busy day looks like.
+  #
+  # Scoped to /api/ because that is the only path that costs a database round trip
+  # before it can be refused; the SPA's assets are cached and cheap.
   rule {
     name     = "api-rate"
     priority = 2
@@ -402,6 +403,86 @@ resource "aws_wafv2_web_acl" "edge" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${var.project}-api-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # The signed-in half, aggregated on the session cookie rather than the address.
+  #
+  # A per-address rule cannot see an account at all, and one account behind a
+  # rotating set of addresses is one client to this rule and many to the one above.
+  # The bucket here is per session cookie value.
+  #
+  # The scope-down is not decoration: a custom-key rule aggregates requests *missing*
+  # the key into one bucket, so without "the cookie is present" every anonymous
+  # visitor shares a bucket and, once this rule blocks, a burst of sign-ins locks all
+  # of them out together. Anonymous traffic stays with api-rate, which keys on
+  # address.
+  #
+  # Measured, because the first attempt at this was wrong: a size_constraint on the
+  # cookie value never matched, and a byte_match on the cookie *key* does. Both were
+  # tried against a probe path before this was written.
+  #
+  # What this does not do: bound a burst. The counter lags the traffic — 12 requests
+  # passed at a limit of 10 before blocking began — so the opening seconds of a flood
+  # get through. It stops sustained abuse from one session; storage is bounded by a
+  # per-user quota, not by a rate.
+  #
+  # 300 per five minutes is 1 request/second sustained. A page load is about five
+  # requests and the app does not poll, so this is a policy number with room to
+  # spare — the traffic so far has almost no signed-in writes to measure.
+  rule {
+    name     = "session-rate"
+    priority = 3
+
+    action {
+      count {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = 300
+        aggregate_key_type = "CUSTOM_KEYS"
+
+        custom_key {
+          cookie {
+            name = "session"
+
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+
+        scope_down_statement {
+          byte_match_statement {
+            search_string         = "session"
+            positional_constraint = "EXACTLY"
+
+            field_to_match {
+              cookies {
+                match_scope       = "KEY"
+                oversize_handling = "MATCH"
+
+                match_pattern {
+                  included_cookies = ["session"]
+                }
+              }
+            }
+
+            text_transformation {
+              priority = 0
+              type     = "LOWERCASE"
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-session-rate"
       sampled_requests_enabled   = true
     }
   }
