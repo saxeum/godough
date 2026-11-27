@@ -20,10 +20,11 @@ databaseSecret:
   name: godough-api
   key: DATABASE_URL
 
+# mountPath is deliberately absent: it is the chart's default and restating it
+# here invites the two from drifting.
 caSecret:
   name: godough-rds-ca
   key: global-bundle.pem
-  mountPath: /certs
 
 oauthSecret:
   name: godough-oauth
