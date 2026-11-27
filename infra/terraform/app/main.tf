@@ -20,6 +20,10 @@ locals {
         bucket = aws_s3_bucket.alb_logs.id
         prefix = "godough"
       }
+      # The ACL is associated by the controller from this annotation, in the same
+      # place as the certificate and the TLS policy, so it cannot drift from the
+      # Ingress it belongs to (#174).
+      wafAclArn = aws_wafv2_web_acl.edge.arn
     }
     # The Secrets are created by `make rds-app-password` and the sync that #125
     # decides on; the chart only names them.
@@ -51,6 +55,10 @@ locals {
         bucket = aws_s3_bucket.alb_logs.id
         prefix = "godough"
       }
+      # The ACL is associated by the controller from this annotation, in the same
+      # place as the certificate and the TLS policy, so it cannot drift from the
+      # Ingress it belongs to (#174).
+      wafAclArn = aws_wafv2_web_acl.edge.arn
     }
   }
 }
@@ -377,4 +385,103 @@ resource "aws_s3_bucket_policy" "alb_logs" {
   bucket     = aws_s3_bucket.alb_logs.id
   policy     = data.aws_iam_policy_document.alb_logs.json
   depends_on = [aws_s3_bucket_public_access_block.alb_logs]
+}
+
+# ---- WAF -------------------------------------------------------------------
+#
+# The first control in this stack that can stop a flood before it reaches the
+# database. One replica and a five-connection pool means a modest burst from one
+# source is enough to make the site unavailable, and nothing upstream was counting
+# (#174).
+#
+# COUNT MODE. Every rule is present and evaluating, and none of them blocks yet.
+# The point is to read what would have been blocked — the access logs from #171 are
+# the input — and then move the rules that actually fire to block. A WAF switched
+# straight into block mode on a working site is how a launch takes itself down at
+# the first false positive.
+
+resource "aws_wafv2_web_acl" "edge" {
+  name        = "${var.project}-edge"
+  description = "Rules in front of the godough ALB. Count mode until the logs say otherwise."
+  scope       = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "aws-common"
+    priority = 1
+
+    override_action {
+      count {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-common"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # The number is measured, not chosen: the access logs from #171 showed 49
+  # requests in 36 minutes across 26 addresses, with a busiest window of **6
+  # requests per address per five minutes**. 100 is sixteen times that, which
+  # leaves room for a browser loading the page a few times and still stops a
+  # sustained flood from one address. The sample is small — one hour of a staging
+  # site — so this is a floor with a stated margin, not a finding; revisit it when
+  # the logs have a week in them.
+  #
+  # Scoped to /api/ because that is the only path that costs a database round
+  # trip before it can be refused; the SPA's assets are cached and cheap.
+  rule {
+    name     = "api-rate"
+    priority = 2
+
+    action {
+      count {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = 100
+        aggregate_key_type = "IP"
+
+        scope_down_statement {
+          byte_match_statement {
+            search_string         = "/api/"
+            positional_constraint = "STARTS_WITH"
+
+            field_to_match {
+              uri_path {}
+            }
+
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-api-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.project}-edge"
+    sampled_requests_enabled   = true
+  }
 }
