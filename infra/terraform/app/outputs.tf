@@ -28,18 +28,17 @@ output "certificate_arn" {
   value       = aws_acm_certificate.edge.arn
 }
 
-output "certificate_validation_record" {
-  description = "The CNAME to add in Cloudflare so the certificate validates. Terraform cannot add it: no Cloudflare credentials here."
-  value = {
-    for option in aws_acm_certificate.edge.domain_validation_options : option.domain_name => {
-      name  = option.resource_record_name
-      type  = option.resource_record_type
-      value = option.resource_record_value
-    }
-  }
+output "certificate_validation_records" {
+  description = "Validation CNAMEs Terraform created in Cloudflare. Listed so they can be checked, not pasted."
+  value       = { for name, record in cloudflare_dns_record.certificate_validation : name => record.name }
 }
 
 output "load_balancer_controller_role" {
   description = "IRSA role the controller uses; the ALB it creates is owned by the Ingress, not by this role."
   value       = aws_iam_role.lbc.arn
+}
+
+output "edge_hostname" {
+  description = "Where godough.foonix.net points once alb_hostname is set."
+  value       = var.alb_hostname == "" ? "(not set yet: apply the Ingress, then pass its hostname as alb_hostname)" : "CNAME godough.foonix.net -> ${var.alb_hostname} (grey)"
 }

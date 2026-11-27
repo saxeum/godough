@@ -100,6 +100,23 @@ distribution, and CloudFront needs **its own certificate in `us-east-1`** — a
 regional ACM certificate cannot be attached to a distribution. That is why the
 certificate here is explicitly regional.
 
+### Verified on the live edge
+
+```
+dig godough.foonix.net          -> CNAME k8s-godough-7d3b96a5d4-...elb.amazonaws.com
+https  /                        -> 200, certificate verified by curl
+http   /                        -> 301 to https
+https  /api/snippet             -> 401 {"error":"Unauthorized"}      # the API answered
+https  /healthz                 -> 404
+```
+
+The 401 is the pass condition for routing: the api's `/api` path is evaluated
+before the ui's `/`, so the request reached the API and its auth, not the SPA's
+index.html. The 404 on `/healthz` is also correct — that path is deliberately
+absent from the Ingress, because the target group health-checks the pod directly
+and a 200 served by the SPA would be a health check that passes while the API is
+dead.
+
 ## What is not here
 
 The Ingress/ALB (#126), the migration Job and its ordering (#115), and anything

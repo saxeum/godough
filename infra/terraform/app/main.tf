@@ -7,6 +7,11 @@ locals {
       digest     = var.api_digest
     }
     trustedOrigins = var.trusted_origins
+    ingress = {
+      enabled        = true
+      host           = var.domain
+      certificateArn = aws_acm_certificate_validation.edge.certificate_arn
+    }
     # The Secrets are created by `make rds-app-password` and the sync that #125
     # decides on; the chart only names them.
     databaseSecret = { name = "godough-api", key = "DATABASE_URL" }
@@ -20,6 +25,11 @@ locals {
       # that does not exist, which reads as "not found" rather than "wrong name".
       repository = "${var.image_registry}/${var.project}-web"
       digest     = var.ui_digest
+    }
+    ingress = {
+      enabled        = true
+      host           = var.domain
+      certificateArn = aws_acm_certificate_validation.edge.certificate_arn
     }
   }
 }
@@ -37,6 +47,8 @@ resource "helm_release" "api" {
   # cannot start (a missing Secret, an unpullable digest) reports success.
   wait    = true
   timeout = 300
+
+  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge]
 }
 
 resource "helm_release" "ui" {
@@ -50,7 +62,7 @@ resource "helm_release" "ui" {
   wait    = true
   timeout = 300
 
-  depends_on = [helm_release.api]
+  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge, helm_release.api]
 }
 
 # ---- AWS Load Balancer Controller ------------------------------------------
@@ -167,4 +179,55 @@ resource "aws_acm_certificate" "edge" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# The zone is in Cloudflare, so the validation record goes there. The token comes
+# from CLOUDFLARE_API_TOKEN in the environment and needs Zone:Read and Zone:DNS:
+# Edit on this one zone — nothing account-wide.
+data "cloudflare_zone" "edge" {
+  filter = {
+    name = var.cloudflare_zone
+  }
+}
+
+# DNS only. ACM fetches this name itself and a proxied record would answer with
+# Cloudflare's edge addresses instead of the value it is looking for.
+resource "cloudflare_dns_record" "certificate_validation" {
+  for_each = {
+    for option in aws_acm_certificate.edge.domain_validation_options : option.domain_name => option
+  }
+
+  zone_id = data.cloudflare_zone.edge.zone_id
+  name    = trimsuffix(each.value.resource_record_name, ".")
+  type    = each.value.resource_record_type
+  content = trimsuffix(each.value.resource_record_value, ".")
+  ttl     = 300
+  proxied = false
+}
+
+# Waits for the certificate to be issued, so anything referencing its ARN is
+# planning against a certificate that exists rather than one that is pending.
+resource "aws_acm_certificate_validation" "edge" {
+  certificate_arn = aws_acm_certificate.edge.arn
+
+  validation_record_fqdns = [for record in cloudflare_dns_record.certificate_validation : record.name]
+}
+
+# Grey (DNS only), on purpose: clients reach the ALB and see its ACM certificate,
+# so there is no second TLS hop to configure and nothing to trust at the edge. The
+# proxy would have to be full-strict to be worth anything, and that belongs with
+# CloudFront (#126's later half), not here.
+#
+# The name comes from the Ingress, which creates the load balancer: Terraform
+# cannot know the ALB's DNS name before that exists, so this is one value to set
+# once, from `kubectl -n godough get ingress godough-api -o jsonpath` .
+resource "cloudflare_dns_record" "edge" {
+  count = var.alb_hostname == "" ? 0 : 1
+
+  zone_id = data.cloudflare_zone.edge.zone_id
+  name    = var.domain
+  type    = "CNAME"
+  content = var.alb_hostname
+  ttl     = 300
+  proxied = false
 }

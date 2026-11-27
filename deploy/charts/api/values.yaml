@@ -66,3 +66,18 @@ service:
 podAnnotations: {}
 nodeSelector: {}
 tolerations: []
+
+# One ALB for both workloads, created by the controller. group.order decides which
+# path wins: the api's /api is evaluated before the ui's /, or every API request
+# would be answered by the SPA's index.html.
+ingress:
+  enabled: false
+  host: ""
+  path: /api
+  pathType: Prefix
+  groupName: godough
+  groupOrder: 10
+  certificateArn: ""
+  # Per-Ingress, which is why there are two: one health-check path each.
+  healthcheckPath: /readyz
+  annotations: {}

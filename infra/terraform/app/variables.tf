@@ -57,3 +57,15 @@ variable "domain" {
   type        = string
   default     = "godough.foonix.net"
 }
+
+variable "cloudflare_zone" {
+  description = "Cloudflare zone holding the hostname. The token needs Zone:Read and Zone:DNS:Edit on this zone only."
+  type        = string
+  default     = "foonix.net"
+}
+
+variable "alb_hostname" {
+  description = "The ALB's DNS name, once the Ingress has created it. Empty leaves the hostname record unmanaged; grey (DNS only) either way."
+  type        = string
+  default     = ""
+}
