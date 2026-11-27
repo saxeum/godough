@@ -53,7 +53,19 @@ spec:
 
       syncPolicy:
         automated:
-          prune: true
+          # selfHeal yes, prune no.
+          #
+          # selfHeal is the whole point: a hand-edit to the cluster is drift, and
+          # the answer to drift is to put it back. prune is a different question,
+          # and the answer here is no for now — with it on, a values key that stops
+          # rendering an object deletes that object, so a typo takes the Ingress
+          # (and the site) down and leaves the *repository* correct. Nothing runs
+          # `make argocd-verify` on a loop; it runs when a human asks.
+          #
+          # Turning it on is a decision for when the values have settled, and the
+          # deliberate act in the meantime is `make argocd-prune APP=…`, which
+          # passes --prune to one sync and says so.
+          prune: false
           selfHeal: true
         retry:
           limit: 5
