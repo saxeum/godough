@@ -10,7 +10,7 @@
 
 image:
   repository: 619071335809.dkr.ecr.ap-southeast-2.amazonaws.com/godough-api
-  digest: sha256:e44ad80d76b53cebde15f5089fd4a2dd19fb6c84c3ec468d9d0121d382033e44
+  digest: sha256:4537b52b23a89d7507c3d6c63d9dabec8937cc9903455785b2c1618be1a7fc45
 
 trustedOrigins: https://godough.foonix.net
 
