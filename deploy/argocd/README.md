@@ -40,18 +40,29 @@ make argocd-password       # user admin; the generated password, until someone c
 prompts — deliberately not an argument, which `ps` would show. `make argocd-apps` is
 the state without the UI or the CLI at all.
 
-## Sync policy, and where it differs
+## Sync policy
 
-| | automated | prune | why |
-|---|---|---|---|
-| `root` | yes | yes | it syncs *definitions* — namespaces, the ApplicationSet. A definition deleted from git should stop existing. |
-| the workloads | yes | yes | one environment, and merge is the approval. There is no human-sync step to protect. |
+| | automated | selfHeal | prune | why |
+|---|---|---|---|---|
+| `root` | yes | yes | **yes** | it syncs *definitions* — a namespace or an ApplicationSet deleted from git should stop existing |
+| the workloads | yes | yes | **no** | a definition is not a workload: an object that stops rendering because a values key was mistyped should not disappear and take the site with it |
 
-`root` and the workloads differ on one thing only: the workloads' prune is what makes
-a bad values key able to delete an Ingress, so the first weeks of this are worth
-watching rather than trusting. If godough ever grows a second environment, the
-ghetto-kube split applies: root automated in both, workloads manual in the one that is
-not staging.
+Prune being off on the workloads is a decision with a cost, stated plainly: an object
+removed from git keeps running until someone prunes it. That is the failure mode
+chosen over its alternative — a typo deleting the Ingress, with the repository still
+looking correct — because nothing runs `make argocd-verify` on a loop, and the cost of
+the wrong object lingering is a diff that `make argocd-verify` or the next review will
+show, while the cost of the wrong object vanishing is downtime.
+
+The deliberate act is one command, per Application, with the diff available first:
+
+```
+make argocd-diff APP=godough-api
+make argocd-prune APP=godough-api
+```
+
+Turning prune on in `clusters/staging/charts.yaml` is the thing to do when the values
+have settled and someone is watching the syncs — not before.
 
 ## Verifying
 
@@ -75,6 +86,15 @@ value files relative to the chart path, so a chart in this repository needs no
 The digest in that file is the digest that runs. A promotion is an edit to it, a pull
 request, and a merge; Argo reconciles. There is no `-var`, no tunnel and no laptop in
 that path.
+
+## The migration Job
+
+`migrations.enabled: true` renders a Helm hook Job, and Argo runs `pre-install,pre-upgrade`
+hooks as **PreSync** — so it runs once per sync, including a sync where nothing changed.
+Kept that way on purpose: #113's advisory lock plus the checksums make a second run a
+sub-second no-op that exits cleanly, and the alternative (a separate Application with its
+own lifecycle and a sync-wave to order it) is a mechanism with no present user. If sync
+frequency ever makes a Job-per-sync expensive, that is the ticket.
 
 ## Not here, and why
 
