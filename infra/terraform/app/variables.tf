@@ -51,3 +51,9 @@ variable "trusted_origins" {
   type        = string
   default     = ""
 }
+
+variable "domain" {
+  description = "Hostname the edge serves. Cloudflare holds the zone; the certificate is regional because the ALB terminates TLS."
+  type        = string
+  default     = "godough.foonix.net"
+}

@@ -63,6 +63,43 @@ reach the API and a cluster that is down look identical from the outside.
 submitted. A missing Secret therefore fails the apply after the timeout instead
 of reporting success over a CrashLoopBackOff.
 
+## The edge: ALB through Cloudflare
+
+Two pieces, and the second one cannot be finished by Terraform alone.
+
+**The controller.** `aws-load-balancer-controller`, installed here with an IRSA
+role and upstream's policy vendored at `policies/`. It is what turns an Ingress
+into an ALB whose target groups hold **pod IPs** — an `aws_lb` built directly
+would route to the node and lose the pod, which is what per-pod health checks and
+readiness need. It discovers the public subnets by tag, which the data stack sets
+(`kubernetes.io/role/elb` and the cluster tag).
+
+**The certificate.** `aws_acm_certificate.edge` for `godough.foonix.net`,
+regional, because the ALB terminates TLS. It is created but **not validated**:
+the validation CNAME lives in the Cloudflare zone and this configuration has no
+Cloudflare credentials. Add the record, then the second apply can use the ARN:
+
+```
+terraform output -json certificate_validation_record
+```
+
+**The DNS records, both in Cloudflare.**
+
+1. The ACM validation CNAME from the output above. One record, and it only has to
+   exist until the certificate is issued.
+2. `godough.foonix.net` → the ALB's DNS name, once the Ingress has created it.
+   Use a CNAME, and whether it is proxied is a real decision:
+   - **DNS only (grey):** clients talk to the ALB, so the ALB's certificate is
+     what browsers see. Simplest, and what to do first.
+   - **Proxied (orange):** Cloudflare terminates TLS and connects to the ALB. Set
+     the SSL mode to Full (strict) so the ALB's certificate is still verified;
+     Flexible would send plaintext across the internet.
+
+When CloudFront arrives it takes the orange path's place: the record points at the
+distribution, and CloudFront needs **its own certificate in `us-east-1`** — a
+regional ACM certificate cannot be attached to a distribution. That is why the
+certificate here is explicitly regional.
+
 ## What is not here
 
 The Ingress/ALB (#126), the migration Job and its ordering (#115), and anything
