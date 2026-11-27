@@ -18,15 +18,28 @@ it is why the Applications are a directory rather than something Terraform build
 
 ## Looking at it
 
-Argo has no ingress. Port-forward and log in with the generated admin secret:
+Argo has no ingress: an exposed control plane is a larger surface than a
+port-forward, and there is one human. Two terminals, because the forward blocks:
 
 ```
-kubectl -n argocd port-forward svc/argocd-server 8080:80
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+make eks-tunnel
 ```
 
-The initial password is only there until someone sets one; it is a bootstrap
-credential, not a secret to keep.
+```
+make argocd-forward
+```
+
+Then <http://127.0.0.1:8090>, user `admin`, password from `make argocd-password`.
+That password is generated at install time and lives in
+`argocd-initial-admin-secret` until someone changes it — a bootstrap credential,
+not a secret to keep.
+
+For the CLI, `make argocd-login` prints the password and starts
+`argocd login 127.0.0.1:8090 --insecure`, which prompts for it. It is deliberately
+not passed as an argument: an argument is visible in `ps`.
+
+`make argocd-apps` is the state without the UI and without the CLI — sync status and
+health for both Applications, straight from the cluster.
 
 ## What is in an Application, and why it is inline
 
