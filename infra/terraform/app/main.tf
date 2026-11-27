@@ -15,7 +15,10 @@ locals {
 
   ui_values = {
     image = {
-      repository = "${var.image_registry}/${var.project}-ui"
+      # -web, not -ui: the repositories are named for the surfaces (#103), and the
+      # first apply of this deployed a digest that resolved against a repository
+      # that does not exist, which reads as "not found" rather than "wrong name".
+      repository = "${var.image_registry}/${var.project}-web"
       digest     = var.ui_digest
     }
   }
