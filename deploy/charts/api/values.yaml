@@ -81,6 +81,9 @@ ingress:
   accessLogs:
     bucket: ""
     prefix: ""
+  # The WAF ACL the controller associates with the ALB. Empty leaves the ALB
+  # unmatched; Terraform passes the ARN once the ACL exists (#174).
+  wafAclArn: ""
 
   host: ""
   path: /api

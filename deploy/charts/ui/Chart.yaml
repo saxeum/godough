@@ -2,4 +2,4 @@ apiVersion: v2
 name: ui
 description: The godough SPA behind the edge. Static files and a fallback, nothing else.
 type: application
-version: 0.1.3
+version: 0.1.4
