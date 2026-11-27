@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig charts-lint
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig charts-lint image-digests
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -242,6 +242,14 @@ eks-tunnel: ## [host] Forward the private EKS API to localhost:6443 through SSM
 	 host=$$(terraform -chdir=$(TF_EKS) output -raw cluster_endpoint | sed 's|https://||'); \
 	 echo "forwarding $$host:443 to 127.0.0.1:6443 through $$target; leave this running, ^C to stop"; \
 	 aws ssm start-session --region $(AWS_REGION) --target "$$target" --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host="$$host",portNumber="443",localPortNumber="6443"
+
+image-digests: ## [host] Print the newest published tag and image digests
+	@for repo in godough-api godough-web; do \
+	  aws ecr describe-images --region $(AWS_REGION) --repository-name $$repo \
+	    --query 'reverse(sort_by(imageDetails[?imageTags],&imagePushedAt))[0].[imageTags[0],imageDigest]' --output text \
+	    | awk -v r="$$repo" '{printf "%-14s %-42s %s\n", r, $$1, $$2}'; \
+	done
+	@echo "newest published, which is not necessarily origin/master: a merge that publishes nothing leaves no image"
 
 eks-kubeconfig: ## [host] Point kubectl at the tunnel above, as context godough-staging
 	@endpoint=$$(terraform -chdir=$(TF_EKS) output -raw cluster_endpoint); \
