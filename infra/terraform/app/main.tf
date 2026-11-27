@@ -13,7 +13,7 @@ resource "helm_release" "argocd" {
   namespace        = "argocd"
   create_namespace = true
 
-  values = [file("${path.module}/values/argocd.yaml")]
+  values = [file("${path.module}/../../../deploy/argocd/install/values.yaml")]
 
   # Applied means running: its CRDs and controller have to be ready before
   # anything is pointed at them.

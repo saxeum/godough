@@ -1,0 +1,14 @@
+# Namespaces this cluster's Applications target.
+#
+# Declared rather than created with `CreateNamespace=true`, which is a *sync
+# option*: an operation's sync options override the Application's rather than
+# inheriting them, so the option works for a controller-driven sync and disappears
+# for a human-triggered one. A namespace that only exists after one kind of sync is
+# a namespace that will be missing after the other.
+#
+# `argocd` is not here: Terraform created it with `create_namespace = true` when it
+# installed Argo, so declaring it would give it a second owner.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: godough

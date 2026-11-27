@@ -1,0 +1,63 @@
+# The two workloads, as one ApplicationSet.
+#
+# A list generator rather than two Application files, because the two are the same
+# shape with different elements and the element is where a future third workload is
+# added — one line, and the diff says which workload appeared.
+#
+# `goTemplate: true` is required: the default fasttemplate engine does not
+# understand `{{ .name }}`, and the generated names come out as the literal, which
+# the controller rejects as a duplicate.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: charts
+  namespace: argocd
+spec:
+  goTemplate: true
+
+  generators:
+    - list:
+        elements:
+          # name is the Application and the Helm release name, and it has to stay
+          # `godough-api`/`godough-ui`: the chart's fullname helper is
+          # `contains .Chart.Name .Release.Name`, so a different release name
+          # renames the Deployment, Service and Ingress and Argo would create new
+          # objects beside the running ones instead of adopting them.
+          - name: godough-api
+            chart: api
+          - name: godough-ui
+            chart: ui
+
+  template:
+    metadata:
+      name: '{{ .name }}'
+      namespace: argocd
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/saxeum/godough.git
+        targetRevision: master
+        path: 'deploy/charts/{{ .chart }}'
+        helm:
+          releaseName: '{{ .name }}'
+          # Beside the chart, so no `$values` ref source is needed: Argo resolves
+          # valueFiles relative to the chart path, and both charts live in this
+          # repository.
+          valueFiles:
+            - values-staging.yaml
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: godough
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 2m

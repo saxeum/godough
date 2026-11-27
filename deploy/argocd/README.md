@@ -1,65 +1,75 @@
 # Argo CD applications
 
-The two Applications that own what runs in the `godough` namespace. Terraform
-installs Argo itself (`helm_release.argocd`, `infra/terraform/app`) and the cluster
-around it; from here on, git is the only writer of the workloads.
+An app-of-apps: one root Application is hand-applied once, and everything below it —
+the namespace, the ApplicationSet, the two workloads — arrives through sync. Adding a
+third workload is a line in `clusters/staging/charts.yaml` and a merge.
+
+```
+deploy/argocd/
+  install/            the argo-cd install: values the Terraform release uses
+  root/               application.yaml — the one object applied by hand
+  clusters/staging/   namespaces.yaml, charts.yaml — what this cluster targets
+deploy/charts/*/values-staging.yaml   the deployment's values, beside each chart
+```
 
 ## Bootstrap
 
-The Applications are applied once, by hand, because an app-of-apps needs one root
-Application to point at the rest and that root is exactly this directory:
-
 ```
-kubectl apply -f deploy/argocd/
+make eks-tunnel        # one terminal, the endpoint is private
+make argocd-seed       # the other: applies deploy/argocd/root/
 ```
 
-That is the one documented exception to "nothing applied outside the pipeline", and
-it is why the Applications are a directory rather than something Terraform builds.
+`make argocd-apps` then shows `root`, `godough-api` and `godough-ui`. Re-running
+`argocd-seed` is harmless; it is the same `kubectl apply` that created the root.
+
+That is the one documented exception to "nothing applied outside the pipeline", and it
+exists because an app-of-apps needs exactly one object placed from outside. Everything
+after it is sync.
 
 ## Looking at it
 
-Argo has no ingress: an exposed control plane is a larger surface than a
-port-forward, and there is one human. Two terminals, because the forward blocks:
+Two terminals, because the forward blocks:
 
 ```
 make eks-tunnel
+make argocd-forward        # http://127.0.0.1:8090
+make argocd-password       # user admin; the generated password, until someone changes it
 ```
 
-```
-make argocd-forward
-```
+`make argocd-login` prints that password and runs `argocd login … --insecure`, which
+prompts — deliberately not an argument, which `ps` would show. `make argocd-apps` is
+the state without the UI or the CLI at all.
 
-Then <http://127.0.0.1:8090>, user `admin`, password from `make argocd-password`.
-That password is generated at install time and lives in
-`argocd-initial-admin-secret` until someone changes it — a bootstrap credential,
-not a secret to keep.
+## Sync policy, and where it differs
 
-For the CLI, `make argocd-login` prints the password and starts
-`argocd login 127.0.0.1:8090 --insecure`, which prompts for it. It is deliberately
-not passed as an argument: an argument is visible in `ps`.
+| | automated | prune | why |
+|---|---|---|---|
+| `root` | yes | yes | it syncs *definitions* — namespaces, the ApplicationSet. A definition deleted from git should stop existing. |
+| the workloads | yes | yes | one environment, and merge is the approval. There is no human-sync step to protect. |
 
-`make argocd-apps` is the state without the UI and without the CLI — sync status and
-health for both Applications, straight from the cluster.
+`root` and the workloads differ on one thing only: the workloads' prune is what makes
+a bad values key able to delete an Ingress, so the first weeks of this are worth
+watching rather than trusting. If godough ever grows a second environment, the
+ghetto-kube split applies: root automated in both, workloads manual in the one that is
+not staging.
 
-## What is in an Application, and why it is inline
+## Values
 
-Values are `helm.valuesObject` in the Application, not a `valueFiles` reference.
-Argo resolves value files relative to the chart directory, and this deployment's
-values are not the chart's — the chart's `values.yaml` is its schema and defaults.
-Keeping them inline also means the object that is reviewed is the object that is
-deployed: **the digest in git is the digest running**, which is the property #127
-exists to buy and which Terraform state alone never gave us.
+`values-staging.yaml` beside each chart, referenced with `valueFiles`. Argo resolves
+value files relative to the chart path, so a chart in this repository needs no
+`$values` ref source — that machinery is for charts that live somewhere else.
 
-## Promotion
+The digest in that file is the digest that runs. A promotion is an edit to it, a pull
+request, and a merge; Argo reconciles. There is no `-var`, no tunnel and no laptop in
+that path.
 
-A new image reaches the cluster by editing `image.digest` in the Application for
-that workload and merging. Argo reconciles. There is no `-var`, no tunnel and no
-laptop in the path.
+## Not here, and why
 
-## Turning sync on
-
-`automated` is deliberately absent until the `helm_release` resources are gone from
-`infra/terraform/app` — two controllers describing the same Deployment is how a
-rollout becomes a fight. The commit that removes them is the commit that enables
-`automated` with `prune: false`, and prune stays off until Argo has been the only
-writer for long enough to trust it.
+- **No ingress for Argo.** An exposed control plane is a much larger surface than a
+  port-forward, and there is one human.
+- **Argo does not upgrade itself.** Terraform installs it. An Argo that manages its own
+  installation cannot be debugged by the thing it manages when it breaks; that is worth
+  revisiting when there is a second cluster to keep in step.
+- **No cascade finalizer on `root`.** With prune on, the two agree, and deleting the
+  root would delete every object it owns. That should be a deliberate act; it gets
+  added in its own commit once the tree has been stable.

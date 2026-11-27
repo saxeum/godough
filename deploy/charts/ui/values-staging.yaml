@@ -1,0 +1,18 @@
+# The staging deployment's values for the ui chart (#127).
+#
+# Only the image and the edge settings differ from the chart's values.yaml. The
+# Ingress has to agree with the api's on every ALB attribute: the two share one
+# load balancer group.
+
+image:
+  repository: 619071335809.dkr.ecr.ap-southeast-2.amazonaws.com/godough-web
+  digest: sha256:42ac6f55d9a0fb8dbd57b83b3fef4a017c718d8d75632753054300dc21e87688
+
+ingress:
+  enabled: true
+  host: godough.foonix.net
+  certificateArn: arn:aws:acm:ap-southeast-2:619071335809:certificate/cb6649c5-cf18-4de0-a563-cb6dc922750c
+  accessLogs:
+    bucket: godough-alb-logs-619071335809
+    prefix: godough
+  wafAclArn: arn:aws:wafv2:ap-southeast-2:619071335809:regional/webacl/godough-edge/87976e4d-8f95-431a-94aa-b7d4a8b58ade

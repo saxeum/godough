@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests argocd-forward argocd-password argocd-login argocd-apps argocd-diff
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests check-argocd argocd-seed argocd-forward argocd-password argocd-login argocd-apps argocd-diff
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -303,6 +303,17 @@ argocd-apps: ## [host] Applications with their sync state and health (needs make
 	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
 	@kubectl -n $(ARGOCD_NAMESPACE) get applications \
 	  -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
+
+check-argocd: ## [host] Render the pinned Argo CD chart with its values, and check the pin agrees with Terraform
+	./deploy/argocd/install/check.sh
+
+argocd-seed: ## [host] Apply the root Application, once: the app-of-apps bootstrap (needs make eks-tunnel)
+	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
+	@# One object is hand-placed and everything below it arrives through sync. This is
+	@# the documented bootstrap exception, and it is idempotent: re-running it after an
+	@# edit is the same as letting Argo notice.
+	@kubectl apply -f deploy/argocd/root/
+	@echo "root applied; watch it with 'make argocd-apps'"
 
 argocd-diff: ## [host] Diff one Application against git: make argocd-diff APP=godough-api (needs argocd-forward and argocd-login)
 	@test -n "$(APP)" || { echo "set APP: make argocd-diff APP=godough-api"; exit 1; }
