@@ -53,6 +53,19 @@ watching rather than trusting. If godough ever grows a second environment, the
 ghetto-kube split applies: root automated in both, workloads manual in the one that is
 not staging.
 
+## Verifying
+
+```
+make argocd-verify
+```
+
+Fails when any Application is not `Synced`/`Healthy`, or when a pod is running an
+image digest the values file does not name. Both, because either alone is a green
+light that lies: `Synced` is Argo's opinion about the objects it manages, and an image
+hand-patched onto a Deployment is drift Argo will revert *later*. The digest check
+compares every replica, not the first — a half-finished rollout runs two digests at
+once.
+
 ## Values
 
 `values-staging.yaml` beside each chart, referenced with `valueFiles`. Argo resolves
