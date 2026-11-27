@@ -6,19 +6,29 @@
 --
 -- Idempotent: safe against a cluster that already has the role, the tables, or
 -- both. Docker runs it from the initdb hook on an empty volume; everywhere else
--- it is `make db-bootstrap`, which is the same SQL rather than a second copy.
+-- it is `make db-bootstrap` or `make rds-bootstrap`, which run this same SQL
+-- rather than a second copy.
 --
--- The password is a development default. Production sets it from a secret and
--- never from this file (#5).
+-- The password never lives in this file. It comes in as the psql variable
+-- app_password, which `make db-bootstrap` leaves unset so the development
+-- default applies, and which `make rds-bootstrap` fills from Secrets Manager
+-- (#114). Nothing here is a secret; the value is bound at run time.
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'godough_app') THEN
-        CREATE ROLE godough_app LOGIN PASSWORD 'snippet_app'
-            NOSUPERUSER NOCREATEDB NOCREATEROLE;
-    END IF;
+\if :{?app_password}
+\else
+\set app_password snippet_app
+\endif
+
+-- CREATE ROLE has no IF NOT EXISTS, and a DO block cannot see a psql variable
+-- inside its dollar quotes. So the statement is generated and then executed,
+-- which also means a re-run after a rotation puts the database back in line with
+-- the secret instead of silently keeping the old password.
+SELECT CASE
+    WHEN EXISTS (SELECT FROM pg_roles WHERE rolname = 'godough_app')
+        THEN format('ALTER ROLE godough_app PASSWORD %L', :'app_password')
+    ELSE format('CREATE ROLE godough_app LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', :'app_password')
 END
-$$;
+\gexec
 
 GRANT USAGE ON SCHEMA public TO godough_app;
 

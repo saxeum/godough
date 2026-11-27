@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig charts-lint
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig charts-lint
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -295,6 +295,36 @@ ecr-pull-test: ecr-login ## [host] Pull the ECR images and run compose plus e2e
 
 db-up: ## [docker] Start Postgres only (:5432)
 	docker compose up -d --wait postgres
+
+# The application role's password: its own secret, separate from the RDS-managed
+# master secret, and created by a human rather than by Terraform so it is not in
+# state, a plan file, or this repository (#114). Re-running changes nothing; a
+# rotation is an explicit put-secret-value, not a side effect.
+APP_PASSWORD_SECRET ?= godough-staging/app-password
+
+rds-app-password: ## [host] Create the godough_app password in Secrets Manager (once)
+	@if aws secretsmanager describe-secret --region $(AWS_REGION) --secret-id $(APP_PASSWORD_SECRET) >/dev/null 2>&1; then \
+	  echo "$(APP_PASSWORD_SECRET) already exists; leaving it alone"; \
+	else \
+	  aws secretsmanager create-secret --region $(AWS_REGION) --name $(APP_PASSWORD_SECRET) \
+	    --description "godough_app password for the staging database" \
+	    --secret-string "{\"password\":\"$$(openssl rand -hex 24)\"}" >/dev/null; \
+	  echo "created $(APP_PASSWORD_SECRET)"; \
+	fi; \
+	echo "the value is never printed: read it with aws secretsmanager get-secret-value"
+
+# Runs as the master, through the tunnel, because the role is cluster-scoped and
+# only the owner may create it. The password comes from Secrets Manager, not from
+# this file.
+rds-bootstrap: ## [host] Create godough_app on RDS from its Secrets Manager password
+	@test -f global-bundle.pem || { echo "download global-bundle.pem first: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"; exit 1; }
+	@secret=$$(terraform -chdir=$(TF_DATA) output -raw master_user_secret_arn); \
+	 master=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id "$$secret" --query SecretString --output text | jq -r .password); \
+	 app=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id $(APP_PASSWORD_SECRET) --query SecretString --output text | jq -r .password); \
+	 endpoint=$$(terraform -chdir=$(TF_DATA) output -raw rds_endpoint | cut -d: -f1); \
+	 echo "bootstrapping godough_app on $$endpoint through the tunnel on :15432"; \
+	 PGPASSWORD="$$master" psql "host=$$endpoint hostaddr=127.0.0.1 port=15432 dbname=godough user=godough sslmode=verify-full sslrootcert=global-bundle.pem" \
+	   -v ON_ERROR_STOP=1 -v app_password="$$app" -1 -f db/bootstrap.sql
 
 db-bootstrap: ## [docker] Create the application role and its grants (once per cluster)
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U godough -d snippet -1 < db/bootstrap.sql

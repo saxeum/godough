@@ -69,5 +69,52 @@ psql "host=$(terraform output -raw rds_endpoint | cut -d: -f1) hostaddr=127.0.0.
 ```
 
 The long-term access path is an EKS pod or Job in the private subnets; the
-bastion is for break-glass work. The app role `godough_app` still needs the
-bootstrap/migration step against this database.
+bastion is for break-glass work.
+
+## The application role
+
+`godough_app` is created once per cluster, before the first migration, by
+`db/bootstrap.sql`. The SQL is the same file the test database uses; only the
+password differs, and it arrives as a psql variable rather than in the file.
+
+```
+make rds-app-password
+```
+
+Creates `godough-staging/app-password` in Secrets Manager, a JSON value of
+`{"password": "..."}` with 24 random bytes in hex. Hex on purpose: the password
+goes into a connection URI, and hex needs no percent-encoding. **Terraform does
+not create this secret**, so the password is not in state, in a plan file, or in
+this repository. Re-running changes nothing; rotation is an explicit
+`aws secretsmanager put-secret-value`, never a side effect of `terraform apply`.
+
+```
+make rds-tunnel    # in one terminal
+make rds-bootstrap # in another
+```
+
+`rds-bootstrap` connects as the master, through the tunnel, and runs the same
+file with the password from the secret. It is idempotent, and a re-run after a
+rotation puts the database back in line with the secret rather than silently
+keeping the old password.
+
+Local development is unchanged: `make db-bootstrap` passes no variable, so the
+development default in the file applies.
+
+## The DSN the application uses
+
+Not stored: assembled where it is needed from the endpoint and the password, so
+there is one secret rather than two copies of one.
+
+```
+postgres://godough_app:<password>@<rds_endpoint>/godough
+  ?sslmode=verify-full&sslrootcert=/certs/global-bundle.pem&pool_max_conns=5
+```
+
+`sslrootcert` is the in-cluster path, where the chart mounts the CA bundle
+(#125). `pool_max_conns=5` is pinned because `pgxpool`'s default is
+`max(4, NumCPU)` per replica, and a default `max_connections` of 100 across ten
+replicas is a connection storm waiting for a rollout.
+
+`godough_app` owns nothing, so any schema change is still the owner's, through the
+migration Job (#115).
