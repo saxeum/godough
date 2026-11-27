@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests check-argocd argocd-seed argocd-forward argocd-password argocd-login argocd-apps argocd-diff
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -269,6 +269,56 @@ eks-kubeconfig: ## [host] Point kubectl at the tunnel above, as context godough-
 	 else \
 	   echo "server: NOT reachable. The endpoint is private: run 'make eks-tunnel' in another terminal."; \
 	 fi
+
+# ---- Argo CD -------------------------------------------------------------
+#
+# Argo has no ingress on purpose: an exposed control plane is a much larger
+# surface than a port-forward. The forward still needs the EKS API, which is
+# private, so the tunnel comes first — every target here says so rather than
+# hanging.
+
+ARGOCD_NAMESPACE ?= argocd
+# 8090, not 8080: the compose stack's load balancer already owns 8080 locally.
+ARGOCD_ADDR ?= 127.0.0.1:8090
+
+argocd-forward: ## [host] Forward the Argo CD UI and API to 127.0.0.1:8090 (needs make eks-tunnel)
+	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
+	@echo "http://$(ARGOCD_ADDR)  —  user admin, password from 'make argocd-password'"
+	@kubectl -n $(ARGOCD_NAMESPACE) port-forward svc/argocd-server 8090:80
+
+argocd-password: ## [host] Print the generated admin password, until someone changes it
+	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
+	@pw=$$(kubectl -n $(ARGOCD_NAMESPACE) get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null); \
+	 [ -n "$$pw" ] || { echo "no argocd-initial-admin-secret: the password was changed, or Argo was reinstalled without it"; exit 1; }; \
+	 echo "$$pw"
+
+argocd-login: ## [host] Log the argocd CLI in to the forwarded server (needs make argocd-forward)
+	@command -v argocd >/dev/null || { echo "argocd CLI not installed: https://argo-cd.readthedocs.io/en/stable/cli_installation/"; exit 1; }
+	@echo "password: $$(kubectl -n $(ARGOCD_NAMESPACE) get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+	@# The password is printed and pasted, not passed in argv: an argument is visible
+	@# in `ps` to every user on the machine, and this one is a bootstrap credential.
+	@argocd login $(ARGOCD_ADDR) --insecure --username admin
+
+argocd-apps: ## [host] Applications with their sync state and health (needs make eks-tunnel)
+	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
+	@kubectl -n $(ARGOCD_NAMESPACE) get applications \
+	  -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
+
+check-argocd: ## [host] Render the pinned Argo CD chart with its values, and check the pin agrees with Terraform
+	./deploy/argocd/install/check.sh
+
+argocd-seed: ## [host] Apply the root Application, once: the app-of-apps bootstrap (needs make eks-tunnel)
+	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
+	@# One object is hand-placed and everything below it arrives through sync. This is
+	@# the documented bootstrap exception, and it is idempotent: re-running it after an
+	@# edit is the same as letting Argo notice.
+	@kubectl apply -f deploy/argocd/root/
+	@echo "root applied; watch it with 'make argocd-apps'"
+
+argocd-diff: ## [host] Diff one Application against git: make argocd-diff APP=godough-api (needs argocd-forward and argocd-login)
+	@test -n "$(APP)" || { echo "set APP: make argocd-diff APP=godough-api"; exit 1; }
+	@command -v argocd >/dev/null || { echo "argocd CLI not installed"; exit 1; }
+	@argocd app diff $(APP) --server $(ARGOCD_ADDR) --insecure
 
 aws-test: ## [host] Check the AWS state bucket exists and is not public
 	cd infra/aws-test && go test -count=1 -v ./...

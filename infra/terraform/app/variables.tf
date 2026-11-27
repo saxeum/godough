@@ -22,36 +22,9 @@ variable "kube_context" {
   default     = "godough-staging"
 }
 
-variable "namespace" {
-  description = "Namespace both releases go into."
-  type        = string
-  default     = "godough"
-}
-
-variable "image_registry" {
-  description = "ECR registry host, from the ecr stack's `registry` output."
-  type        = string
-}
-
 # No defaults on purpose. A tag can move between review and rollout; a digest
 # cannot, and a required variable is the only way to be sure the digest was a
 # decision rather than whatever was lying around.
-variable "api_digest" {
-  description = "Digest of the api image to deploy, sha256:... from ECR."
-  type        = string
-}
-
-variable "ui_digest" {
-  description = "Digest of the ui image to deploy, sha256:... from ECR."
-  type        = string
-}
-
-variable "trusted_origins" {
-  description = "Exact origin the UI is served from, for the API's CSRF check. Empty disables the browser flows that need it."
-  type        = string
-  default     = "https://godough.foonix.net"
-}
-
 variable "domain" {
   description = "Hostname the edge serves. Cloudflare holds the zone; the certificate is regional because the ALB terminates TLS."
   type        = string

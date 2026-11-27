@@ -1,8 +1,8 @@
 # Staging app stack
 
-Installs the two charts from `deploy/charts` into the cluster from the `eks`
-stack. Argo CD replaces this later (#127); until then `terraform apply` is the
-deploy.
+The account-side half of the deployment: the edge certificate, the ALB log bucket,
+the WAF, and the Argo CD installation itself. The two workloads are **not** applied
+here any more — Argo owns them, from `deploy/argocd/` (#127).
 
 ```
 cp backend.hcl.example backend.hcl   # set bucket to the #102 output
@@ -18,18 +18,24 @@ make eks-tunnel
 Leaving that running in its own terminal, in another:
 
 ```
-make image-digests
+terraform plan -var alb_hostname=k8s-godough-7d3b96a5d4-386819741.ap-southeast-2.elb.amazonaws.com
 ```
 
-```
-terraform plan -var image_registry=<registry> -var api_digest=<sha256:...> -var ui_digest=<sha256:...>
-```
+`alb_hostname` has to be passed **every time**. It has an empty default, and
+`cloudflare_dns_record.edge` is `count = var.alb_hostname == "" ? 0 : 1`, so a plan
+without it wants to delete the record that points the domain at the ALB; a plan
+with a `will be destroyed` line for `cloudflare_dns_record` is that mistake and not
+a change. The value is the load balancer's DNS name, which the Ingress creates.
 
-Both digests are **required variables with no default**. A tag can move between
-review and rollout, so the digest is a decision to make and write down, not
-something to fall back on. `make image-digests` prints the newest *published*
-tag and digests, which is not the same as `origin/master`: a docs-only merge
+There are no image digests on the command line any more: the digest a workload runs
+is in its Application under `deploy/argocd/`, which is the object a reviewer reads
+and the object Argo applies. `make image-digests` still prints the newest published
+tag and digests, and it is not the same as `origin/master` — a docs-only merge
 publishes nothing, so `HEAD` frequently has no image.
+
+After the first apply of a new ACM certificate, the Ingress in Argo refers to it by
+ARN, so a certificate replacement is two steps: apply here, then update the
+`certificateArn` in the Applications.
 
 The provider reads the kubeconfig `make eks-kubeconfig` wrote, which dials
 `127.0.0.1:6443` with the real hostname as `tls-server-name`. Without

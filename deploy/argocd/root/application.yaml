@@ -1,0 +1,46 @@
+# The seed Application: the object that makes this cluster a GitOps cluster.
+#
+# Applied once, by hand (`kubectl apply -f deploy/argocd/root/`), because an
+# app-of-apps needs exactly one root and that root is this file. Everything after
+# it — the namespaces, the ApplicationSet, the two workloads — arrives through sync,
+# so adding a third workload is a merge and not a kubectl from a laptop.
+#
+# It points at a *directory*, so every manifest under clusters/staging is applied by
+# this one sync. That is the whole trick: one object to hand-place, and the tree
+# below it is ordinary YAML that a reviewer reads.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  # No cascade finalizer yet. With prune on (below) the two agree and deleting an
+  # Application should delete what it manages — but this is the object that owns
+  # every other object, and a mistyped delete should not empty the namespace. Turn
+  # it on when the tree has been stable for a while, in its own commit.
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/saxeum/godough.git
+    targetRevision: master
+    path: deploy/argocd/clusters/staging
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      # Prune and selfHeal here, unlike a workload. This Application syncs
+      # *definitions* — namespaces, the ApplicationSet — and a definition that is
+      # deleted from git should stop existing. A workload is different: its
+      # Application is sync'd by the thing this one creates, and its prune decides
+      # whether a bad values key can delete an Ingress.
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

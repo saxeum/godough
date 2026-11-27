@@ -1,68 +1,26 @@
-locals {
-  charts = "${path.module}/../../../deploy/charts"
-
-  # The charts' values live in values/*.yaml, not in this file: a deployment is
-  # configuration that a reviewer should be able to read without parsing HCL, and
-  # a HCL map that mirrors the chart's schema is the same thing written twice.
-  #
-  # Four values are templated rather than written down, because they are not
-  # configuration: the image digest is a decision made at deploy time, and the
-  # certificate, log bucket and WAF ACL only exist once this stack has created
-  # them.
-  api_values = templatefile("${path.module}/values/api.yaml", {
-    image_repository = "${var.image_registry}/${var.project}-api"
-    image_digest     = var.api_digest
-    trusted_origins  = var.trusted_origins
-    ingress_host     = var.domain
-    certificate_arn  = aws_acm_certificate_validation.edge.certificate_arn
-    log_bucket       = aws_s3_bucket.alb_logs.id
-    waf_acl_arn      = aws_wafv2_web_acl.edge.arn
-  })
-
-  # -web, not -ui: the repositories are named for the surfaces (#103), and the
-  # first apply of this deployed a digest that resolved against a repository that
-  # does not exist, which reads as "not found" rather than "wrong name".
-  ui_values = templatefile("${path.module}/values/ui.yaml", {
-    image_repository = "${var.image_registry}/${var.project}-web"
-    image_digest     = var.ui_digest
-    ingress_host     = var.domain
-    certificate_arn  = aws_acm_certificate_validation.edge.certificate_arn
-    log_bucket       = aws_s3_bucket.alb_logs.id
-    waf_acl_arn      = aws_wafv2_web_acl.edge.arn
-  })
-}
-
-resource "helm_release" "api" {
-  name      = "godough-api"
-  chart     = "${local.charts}/api"
-  namespace = var.namespace
-  # Created here rather than by a second provider for two workloads.
+# ---- Argo CD ---------------------------------------------------------------
+#
+# The bootstrap for #127. Terraform installs it once; after the handover this file
+# no longer owns the two workloads and Argo reconciles them from git.
+#
+# Installed here rather than by an Application: an Argo that manages its own
+# installation cannot be debugged by the thing it manages when it breaks.
+resource "helm_release" "argocd" {
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  version          = "10.20.0"
+  namespace        = "argocd"
   create_namespace = true
 
-  values = [local.api_values]
+  values = [file("${path.module}/../../../deploy/argocd/install/values.yaml")]
 
-  # Applied means running, not merely applied. Without this a rollout that
-  # cannot start (a missing Secret, an unpullable digest) reports success.
+  # Applied means running: its CRDs and controller have to be ready before
+  # anything is pointed at them.
   wait    = true
-  timeout = 300
+  timeout = 900
 
-  # The policy, not just the bucket: the listener is told to write before the
-  # bucket would accept it otherwise, and the first logs would be a silent 403.
-  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge, aws_s3_bucket_policy.alb_logs]
-}
-
-resource "helm_release" "ui" {
-  name             = "godough-ui"
-  chart            = "${local.charts}/ui"
-  namespace        = var.namespace
-  create_namespace = false
-
-  values = [local.ui_values]
-
-  wait    = true
-  timeout = 300
-
-  depends_on = [helm_release.lbc, aws_acm_certificate_validation.edge, helm_release.api, aws_s3_bucket_policy.alb_logs]
+  depends_on = [helm_release.lbc]
 }
 
 # ---- AWS Load Balancer Controller ------------------------------------------
