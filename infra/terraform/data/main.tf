@@ -340,7 +340,13 @@ resource "aws_db_instance" "postgres" {
   apply_immediately          = true
   auto_minor_version_upgrade = true
 
-  deletion_protection   = false
+  # A `terraform destroy` or a console cleanup must not be able to take the only
+  # database. Turning this off is then a deliberate two-step, which is the point;
+  # the seven-day point-in-time window is the recovery path, not a backup (#148).
+  deletion_protection = true
+
+  # Still true: with deletion protection on, this flag only matters on a destroy
+  # someone asked for, and where a final snapshot goes is a separate decision.
   skip_final_snapshot   = true
   copy_tags_to_snapshot = true
 
