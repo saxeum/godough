@@ -176,6 +176,39 @@ func TestListSnippetsIsAnEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
+// A cache directive set on the success path only is the mistake this asserts
+// against: the two responses that matter are a 200 carrying someone's snippets
+// and the 401 an anonymous client gets, and both have to say no-store. The probe
+// is here because the directive is applied to the whole server on purpose, and a
+// future path test that quietly stopped applying it would show up as this one.
+func TestNoStoreOnEveryResponse(t *testing.T) {
+	router := newRouter(t, newRepo())
+
+	signedIn := do(t, router, http.MethodGet, "/api/snippet", "")
+	if signedIn.Code != http.StatusOK {
+		t.Fatalf("signed-in status = %d, want %d", signedIn.Code, http.StatusOK)
+	}
+
+	// The helper adds a valid cookie; this one deliberately does not.
+	anonymous := httptest.NewRecorder()
+	router.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/snippet", nil))
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous status = %d, want %d", anonymous.Code, http.StatusUnauthorized)
+	}
+
+	probe := do(t, router, http.MethodGet, "/healthz", "")
+
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"signed in": signedIn,
+		"anonymous": anonymous,
+		"probe":     probe,
+	} {
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q, want no-store", name, got)
+		}
+	}
+}
+
 func TestGetSnippet(t *testing.T) {
 	router := newRouter(t, newRepo())
 

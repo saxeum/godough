@@ -183,3 +183,18 @@ func requestDeadline(timeout time.Duration, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// noStore marks every response this server writes as uncacheable.
+//
+// The bodies are one user's data — their snippets, and the address and name behind
+// their session — and the probes are meaningless to cache, so there is one rule
+// rather than a path test that would exist for no reader. It is a middleware and
+// not a line in writeJSON because the generated handlers write their own
+// responses: a header set in writeJSON would cover the error paths and miss every
+// 200, which is the half that carries the data.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
