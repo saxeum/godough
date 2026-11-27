@@ -30,6 +30,59 @@ resource "aws_guardduty_detector" "this" {
 
 data "aws_caller_identity" "current" {}
 
+# A customer managed key, because both `iac` findings here are about that and
+# unlike the ALB log bucket (see #176) CloudTrail definitely supports one. The key
+# is what makes the archive readable only by the people who were given the key,
+# and what lets it be revoked: an audit trail encrypted with SSE-S3 is protected by
+# the bucket policy alone, which is the thing an attacker with the account would
+# change first.
+#
+# A custom key policy replaces the default, so the account-root statement has to be
+# written back or the key is not administrable by anyone — the same trap the EKS
+# secrets key documents.
+data "aws_iam_policy_document" "cloudtrail_key" {
+  statement {
+    sid    = "AllowCloudTrailToEncrypt"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    actions = [
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey",
+    ]
+
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AllowAccountAdministration"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_kms_key" "cloudtrail" {
+  description         = "${var.project} CloudTrail log encryption"
+  enable_key_rotation = true
+  policy              = data.aws_iam_policy_document.cloudtrail_key.json
+}
+
+resource "aws_kms_alias" "cloudtrail" {
+  name          = "alias/${var.project}-cloudtrail"
+  target_key_id = aws_kms_key.cloudtrail.key_id
+}
+
 resource "aws_s3_bucket" "cloudtrail" {
   bucket = "${var.project}-cloudtrail-${data.aws_caller_identity.current.account_id}"
 }
@@ -53,16 +106,13 @@ resource "aws_s3_bucket_versioning" "cloudtrail" {
   }
 }
 
-# SSE-S3 rather than a customer key, for the same reason as the ALB log bucket:
-# the trail is not configured with a KMS key, and switching it to one is a
-# separate decision about who can read the account's audit history. #176 is where
-# that argument is being had for the other bucket.
 resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
   bucket = aws_s3_bucket.cloudtrail.id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.cloudtrail.arn
     }
   }
 }
@@ -159,6 +209,7 @@ resource "aws_cloudtrail" "management" {
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_log_file_validation    = true
+  kms_key_id                    = aws_kms_key.cloudtrail.arn
 
   # Modelled because the import found it, not because this change wants it. The
   # trail has had a custom "Management events" selector since it was created in
