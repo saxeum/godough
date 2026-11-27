@@ -1,66 +1,35 @@
 locals {
   charts = "${path.module}/../../../deploy/charts"
 
-  api_values = {
-    image = {
-      repository = "${var.image_registry}/${var.project}-api"
-      digest     = var.api_digest
-    }
-    trustedOrigins = var.trusted_origins
-    # The sign-in Secret is created by make k8s-secrets from the environment; the
-    # chart only names it.
-    oauthSecret = { name = "godough-oauth" }
-    ingress = {
-      enabled        = true
-      host           = var.domain
-      certificateArn = aws_acm_certificate_validation.edge.certificate_arn
-      # The bucket name is a deployment fact, so it is a value here rather than a
-      # constant in the chart (#171).
-      accessLogs = {
-        bucket = aws_s3_bucket.alb_logs.id
-        prefix = "godough"
-      }
-      # The ACL is associated by the controller from this annotation, in the same
-      # place as the certificate and the TLS policy, so it cannot drift from the
-      # Ingress it belongs to (#174).
-      wafAclArn = aws_wafv2_web_acl.edge.arn
-    }
-    # The Secrets are created by `make rds-app-password` and the sync that #125
-    # decides on; the chart only names them.
-    databaseSecret = { name = "godough-api", key = "DATABASE_URL" }
-    caSecret       = { name = "godough-rds-ca", key = "global-bundle.pem" }
-    # The migration hook (#115): same image as the Deployment, owner credentials
-    # from a Secret that `make k8s-secrets` writes, run before the rollout.
-    migrations = {
-      enabled     = true
-      ownerSecret = "godough-owner"
-    }
-  }
+  # The charts' values live in values/*.yaml, not in this file: a deployment is
+  # configuration that a reviewer should be able to read without parsing HCL, and
+  # a HCL map that mirrors the chart's schema is the same thing written twice.
+  #
+  # Four values are templated rather than written down, because they are not
+  # configuration: the image digest is a decision made at deploy time, and the
+  # certificate, log bucket and WAF ACL only exist once this stack has created
+  # them.
+  api_values = templatefile("${path.module}/values/api.yaml", {
+    image_repository = "${var.image_registry}/${var.project}-api"
+    image_digest     = var.api_digest
+    trusted_origins  = var.trusted_origins
+    ingress_host     = var.domain
+    certificate_arn  = aws_acm_certificate_validation.edge.certificate_arn
+    log_bucket       = aws_s3_bucket.alb_logs.id
+    waf_acl_arn      = aws_wafv2_web_acl.edge.arn
+  })
 
-  ui_values = {
-    image = {
-      # -web, not -ui: the repositories are named for the surfaces (#103), and the
-      # first apply of this deployed a digest that resolved against a repository
-      # that does not exist, which reads as "not found" rather than "wrong name".
-      repository = "${var.image_registry}/${var.project}-web"
-      digest     = var.ui_digest
-    }
-    ingress = {
-      enabled        = true
-      host           = var.domain
-      certificateArn = aws_acm_certificate_validation.edge.certificate_arn
-      # The bucket name is a deployment fact, so it is a value here rather than a
-      # constant in the chart (#171).
-      accessLogs = {
-        bucket = aws_s3_bucket.alb_logs.id
-        prefix = "godough"
-      }
-      # The ACL is associated by the controller from this annotation, in the same
-      # place as the certificate and the TLS policy, so it cannot drift from the
-      # Ingress it belongs to (#174).
-      wafAclArn = aws_wafv2_web_acl.edge.arn
-    }
-  }
+  # -web, not -ui: the repositories are named for the surfaces (#103), and the
+  # first apply of this deployed a digest that resolved against a repository that
+  # does not exist, which reads as "not found" rather than "wrong name".
+  ui_values = templatefile("${path.module}/values/ui.yaml", {
+    image_repository = "${var.image_registry}/${var.project}-web"
+    image_digest     = var.ui_digest
+    ingress_host     = var.domain
+    certificate_arn  = aws_acm_certificate_validation.edge.certificate_arn
+    log_bucket       = aws_s3_bucket.alb_logs.id
+    waf_acl_arn      = aws_wafv2_web_acl.edge.arn
+  })
 }
 
 resource "helm_release" "api" {
@@ -70,7 +39,7 @@ resource "helm_release" "api" {
   # Created here rather than by a second provider for two workloads.
   create_namespace = true
 
-  values = [yamlencode(local.api_values)]
+  values = [local.api_values]
 
   # Applied means running, not merely applied. Without this a rollout that
   # cannot start (a missing Secret, an unpullable digest) reports success.
@@ -88,7 +57,7 @@ resource "helm_release" "ui" {
   namespace        = var.namespace
   create_namespace = false
 
-  values = [yamlencode(local.ui_values)]
+  values = [local.ui_values]
 
   wait    = true
   timeout = 300

@@ -1,0 +1,44 @@
+# Deployment values for the api chart.
+#
+# Configuration lives here; identities are templated in by Terraform because
+# they are not configuration: the image digest is a decision made at deploy time,
+# and the certificate, log bucket and WAF ACL names exist only once the account
+# has created them. Everything else is a fact about this deployment and belongs
+# in a file a reviewer can read without parsing HCL.
+
+image:
+  repository: ${image_repository}
+  digest: ${image_digest}
+
+# Origins allowed to make cookie-authenticated writes. Exact, never a wildcard.
+trustedOrigins: ${trusted_origins}
+
+# Both Secrets are created outside this chart: the database DSN by
+# `make k8s-secrets`, the sign-in client by hand from the Google project. The
+# chart names them and never assembles them from parts.
+databaseSecret:
+  name: godough-api
+  key: DATABASE_URL
+
+caSecret:
+  name: godough-rds-ca
+  key: global-bundle.pem
+  mountPath: /certs
+
+oauthSecret:
+  name: godough-oauth
+
+# The migration hook runs the same digest as the Deployment, before the rollout,
+# with the owner credentials that only the Job mounts.
+migrations:
+  enabled: true
+  ownerSecret: godough-owner
+
+ingress:
+  enabled: true
+  host: ${ingress_host}
+  certificateArn: ${certificate_arn}
+  accessLogs:
+    bucket: ${log_bucket}
+    prefix: godough
+  wafAclArn: ${waf_acl_arn}
