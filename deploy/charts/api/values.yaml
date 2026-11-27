@@ -75,6 +75,13 @@ tolerations: []
 # would be answered by the SPA's index.html.
 ingress:
   enabled: false
+  # ALB access logs live in the same attribute set as deletion protection. Empty
+  # leaves them off; the bucket name is a deployment fact, so Terraform sets it
+  # and the chart never guesses (#171).
+  accessLogs:
+    bucket: ""
+    prefix: ""
+
   host: ""
   path: /api
   pathType: Prefix
