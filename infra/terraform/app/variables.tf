@@ -49,5 +49,23 @@ variable "ui_digest" {
 variable "trusted_origins" {
   description = "Exact origin the UI is served from, for the API's CSRF check. Empty disables the browser flows that need it."
   type        = string
+  default     = "https://godough.foonix.net"
+}
+
+variable "domain" {
+  description = "Hostname the edge serves. Cloudflare holds the zone; the certificate is regional because the ALB terminates TLS."
+  type        = string
+  default     = "godough.foonix.net"
+}
+
+variable "cloudflare_zone" {
+  description = "Cloudflare zone holding the hostname. The token needs Zone:Read and Zone:DNS:Edit on this zone only."
+  type        = string
+  default     = "foonix.net"
+}
+
+variable "alb_hostname" {
+  description = "The ALB's DNS name, once the Ingress has created it. Empty leaves the hostname record unmanaged; grey (DNS only) either way."
+  type        = string
   default     = ""
 }

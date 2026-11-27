@@ -1,0 +1,39 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # Pod IPs, not instance ports: this is what lets the target group see the pod
+    # and therefore what lets it health-check the pod.
+    alb.ingress.kubernetes.io/target-type: ip
+    # One ALB for both resources, ordered so the more specific path wins.
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
+    alb.ingress.kubernetes.io/group.order: {{ .Values.ingress.groupOrder | quote }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/certificate-arn: {{ required "ingress.certificateArn is required when ingress is enabled" .Values.ingress.certificateArn }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheckPath }}
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '15'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ required "ingress.host is required when ingress is enabled" .Values.ingress.host }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "api.fullname" . }}
+                port:
+                  name: http
+{{- end }}

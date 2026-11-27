@@ -51,6 +51,12 @@ resource "aws_subnet" "public" {
   tags = {
     Name = "${var.project}-public-${count.index + 1}"
     Tier = "public"
+
+    # How the AWS Load Balancer Controller finds subnets to put an internet-facing
+    # ALB in. Without the role tag it reports "unable to discover subnets" and no
+    # ALB is created; without the cluster tag it ignores the subnet entirely.
+    "kubernetes.io/role/elb"                       = "1"
+    "kubernetes.io/cluster/${var.project}-staging" = "shared"
   }
 }
 

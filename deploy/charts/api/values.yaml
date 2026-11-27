@@ -21,8 +21,11 @@ caSecret:
   mountPath: /certs
 # Google sign-in is all-or-none: a partial set is a boot error, so these keys are
 # optional and a Secret without them runs with sign-in disabled.
+# Separate from the database Secret: the sign-in credentials come from a Google
+# project, not from Secrets Manager, and `make k8s-secrets` writes this one from
+# the environment.
 oauthSecret:
-  name: godough-api
+  name: godough-oauth
   clientIDKey: GOOGLE_CLIENT_ID
   clientSecretKey: GOOGLE_CLIENT_SECRET
   redirectURLKey: GOOGLE_REDIRECT_URL
@@ -66,3 +69,28 @@ service:
 podAnnotations: {}
 nodeSelector: {}
 tolerations: []
+
+# One ALB for both workloads, created by the controller. group.order decides which
+# path wins: the api's /api is evaluated before the ui's /, or every API request
+# would be answered by the SPA's index.html.
+ingress:
+  enabled: false
+  host: ""
+  path: /api
+  pathType: Prefix
+  groupName: godough
+  groupOrder: 10
+  certificateArn: ""
+  # Per-Ingress, which is why there are two: one health-check path each.
+  healthcheckPath: /readyz
+  annotations: {}
+
+# Migrations run as a Helm pre-install/pre-upgrade hook, in the same image as the
+# Deployment. The API never migrates at startup: several replicas would race, and
+# the application role owns nothing anyway.
+migrations:
+  enabled: true
+  # Holds DATABASE_URL_OWNER, created by `make k8s-secrets` from the RDS-managed
+  # master secret. The owner credential is in this Secret and nowhere else.
+  ownerSecret: godough-owner
+  activeDeadlineSeconds: 600
