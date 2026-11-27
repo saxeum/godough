@@ -493,3 +493,72 @@ resource "aws_wafv2_web_acl" "edge" {
     sampled_requests_enabled   = true
   }
 }
+
+# ---- WAF logs --------------------------------------------------------------
+#
+# Metrics are not enough to run a WAF. `CountedRequests` says a rule matched; it does
+# not say which one, and a count-mode rate rule publishes no metric at all (#187).
+# Without the log, "count mode is observing, so we can decide what to block" is an
+# assumption — and one that was demonstrated to be unobservable.
+#
+# The log group name must start with `aws-waf-logs-`: that prefix is how the service
+# decides a group is an allowed destination, so it is part of the contract rather
+# than a naming preference.
+
+resource "aws_cloudwatch_log_group" "waf" {
+  name = "aws-waf-logs-${var.project}-edge"
+
+  # Thirty days: long enough to read a week of traffic and decide, short enough that
+  # nobody has to think about the bill.
+  retention_in_days = 30
+}
+
+data "aws_iam_policy_document" "waf_logs" {
+  statement {
+    sid    = "AllowWAFLogDelivery"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.waf.arn}:*"]
+
+    # No aws:SourceAccount condition, deliberately and unlike the ALB log bucket.
+    # WAF's log delivery does not assert that key, and a condition it cannot satisfy
+    # denies the write silently: the block happens, the metric counts it, and nothing
+    # appears in the group. The resource is already scoped to one log group in one
+    # account, which is the guarantee the condition was there to add.
+  }
+}
+
+resource "aws_cloudwatch_log_resource_policy" "waf_logs" {
+  policy_name     = "${var.project}-waf-log-delivery"
+  policy_document = data.aws_iam_policy_document.waf_logs.json
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "edge" {
+  resource_arn            = aws_wafv2_web_acl.edge.arn
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
+
+  # The session cookie is a bearer token. A WAF log records the request headers, so
+  # without this every rule match would put a usable credential in a log group that
+  # a wider set of people can read than can read the database. Nothing in a decision
+  # about which rule fired needs the token, and the rule's aggregation key is logged
+  # by WAF separately as a hash-free key value only when it blocks.
+  redacted_fields {
+    single_header {
+      name = "cookie"
+    }
+  }
+
+  redacted_fields {
+    single_header {
+      name = "authorization"
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_resource_policy.waf_logs]
+}
