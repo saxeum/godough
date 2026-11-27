@@ -1,0 +1,61 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "api.fullname" . }}-migrate
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+  annotations:
+    # Before the Deployment on every install and upgrade, and Helm waits for it.
+    # A migration that fails therefore fails the release, and the Deployment is
+    # never updated against a schema the code does not expect.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    # A Job is immutable and Helm does not collect hooks. Without this the second
+    # upgrade fails with "field is immutable" on the pod template, which is the
+    # least obvious way to discover a hook was never cleaned up.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # No retries: a migration that failed half way is a decision to make, not a
+  # loop to enter. The advisory lock in the runner is what makes a re-run safe.
+  backoffLimit: 0
+  parallelism: 1
+  completions: 1
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # The same digest as the Deployment, from the same value: the SQL is
+          # embedded in this binary, so a second image could migrate a database
+          # for code that is not the code being deployed.
+          image: {{ include "api.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/migrate"]
+          envFrom:
+            # Not optional: without the owner DSN the migration cannot run, and a
+            # deploy that silently skips migrations is worse than one that stops.
+            - secretRef:
+                name: {{ .Values.migrations.ownerSecret }}
+          volumeMounts:
+            - name: ca
+              mountPath: {{ .Values.caSecret.mountPath }}
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: ca
+          secret:
+            secretName: {{ .Values.caSecret.name }}
+            items:
+              - key: {{ .Values.caSecret.key }}
+                path: {{ .Values.caSecret.key }}
+{{- end }}

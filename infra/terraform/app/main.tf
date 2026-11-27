@@ -19,6 +19,12 @@ locals {
     # decides on; the chart only names them.
     databaseSecret = { name = "godough-api", key = "DATABASE_URL" }
     caSecret       = { name = "godough-rds-ca", key = "global-bundle.pem" }
+    # The migration hook (#115): same image as the Deployment, owner credentials
+    # from a Secret that `make k8s-secrets` writes, run before the rollout.
+    migrations = {
+      enabled     = true
+      ownerSecret = "godough-owner"
+    }
   }
 
   ui_values = {

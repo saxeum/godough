@@ -84,3 +84,13 @@ ingress:
   # Per-Ingress, which is why there are two: one health-check path each.
   healthcheckPath: /readyz
   annotations: {}
+
+# Migrations run as a Helm pre-install/pre-upgrade hook, in the same image as the
+# Deployment. The API never migrates at startup: several replicas would race, and
+# the application role owns nothing anyway.
+migrations:
+  enabled: true
+  # Holds DATABASE_URL_OWNER, created by `make k8s-secrets` from the RDS-managed
+  # master secret. The owner credential is in this Secret and nowhere else.
+  ownerSecret: godough-owner
+  activeDeadlineSeconds: 600

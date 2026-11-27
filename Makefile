@@ -347,6 +347,13 @@ k8s-secrets: ## [host] Create the DSN, CA and sign-in Secrets in the cluster (ne
 	   --from-literal=DATABASE_URL="$$dsn" --dry-run=client -o yaml | kubectl apply -f - ; \
 	 kubectl -n $(K8S_NAMESPACE) create secret generic godough-rds-ca \
 	   --from-file=global-bundle.pem=./global-bundle.pem --dry-run=client -o yaml | kubectl apply -f - ; \
+	 master_secret=$$(terraform -chdir=$(TF_DATA) output -raw master_user_secret_arn); \
+	 master=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id "$$master_secret" --query SecretString --output text); \
+	 m_user=$$(echo "$$master" | jq -r .username); \
+	 m_pw=$$(echo "$$master" | jq -r .password); \
+	 owner_dsn="host=$$endpoint dbname=godough user=$$m_user password='$$m_pw' sslmode=verify-full sslrootcert=/certs/global-bundle.pem"; \
+	 kubectl -n $(K8S_NAMESPACE) create secret generic godough-owner \
+	   --from-literal=DATABASE_URL_OWNER="$$owner_dsn" --dry-run=client -o yaml | kubectl apply -f - ; \
 	 if [ -n "$$GOOGLE_CLIENT_ID" ] && [ -n "$$GOOGLE_CLIENT_SECRET" ]; then \
 	   kubectl -n $(K8S_NAMESPACE) create secret generic godough-oauth \
 	     --from-literal=GOOGLE_CLIENT_ID="$$GOOGLE_CLIENT_ID" \
@@ -357,7 +364,9 @@ k8s-secrets: ## [host] Create the DSN, CA and sign-in Secrets in the cluster (ne
 	 else \
 	   echo "GOOGLE_CLIENT_ID/SECRET are empty: sign-in stays disabled"; \
 	 fi; \
-	 echo "godough-api and godough-rds-ca are in $(K8S_NAMESPACE); re-run this after rotating the password"
+	 echo "godough-api, godough-rds-ca and godough-owner are in $(K8S_NAMESPACE); re-run this after rotating a password"
+	@# Keyword/value, not a URL: a generated RDS password containing @ or / is
+	@# silently mangled by URL parsing, and the failure looks like bad credentials.
 
 rds-bootstrap: ## [host] Create godough_app on RDS from its Secrets Manager password
 	@test -f global-bundle.pem || { echo "download global-bundle.pem first: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"; exit 1; }
