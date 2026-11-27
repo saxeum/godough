@@ -1,0 +1,64 @@
+# Argo CD, installed once by Terraform and then left to reconcile itself (#127).
+#
+# Terraform installs it because something has to, and because the alternative — a
+# human running `kubectl apply` against a private endpoint through a tunnel — is the
+# "applied outside the pipeline" exception this repository allows exactly once.
+# After the handover, Terraform owns the cluster and the account; Argo owns what
+# runs on the cluster.
+
+# No SSO. There is one human and one cluster; `argocd login` with the generated
+# admin secret over a port-forward is enough, and Dex is four more pods plus a
+# dependency to keep current.
+dex:
+  enabled: false
+
+# Nothing to notify.
+notifications:
+  enabled: false
+
+# The ApplicationSet controller has no switch in this chart version, so it runs
+# whether or not it is used. Two Applications are written by hand and reviewed in
+# git; an ApplicationSet earns its place when the number of them stops being
+# countable. Left as it ships rather than pinned to a version that would take it
+# away.
+
+# No ingress and no TLS: the server is reachable only through `kubectl port-forward`,
+# so a self-signed certificate under that tunnel is a warning to click through on
+# every login and nothing else.
+configs:
+  params:
+    server.insecure: true
+
+# Requests are set because the nodes are t3.small (~1.4 GiB allocatable each) and an
+# Argo CD that cannot schedule reads like a broken chart.
+controller:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

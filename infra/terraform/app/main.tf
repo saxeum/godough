@@ -32,6 +32,31 @@ locals {
   })
 }
 
+# ---- Argo CD ---------------------------------------------------------------
+#
+# The bootstrap for #127. Terraform installs it once; after the handover this file
+# no longer owns the two workloads and Argo reconciles them from git.
+#
+# Installed here rather than by an Application: an Argo that manages its own
+# installation cannot be debugged by the thing it manages when it breaks.
+resource "helm_release" "argocd" {
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  version          = "10.20.0"
+  namespace        = "argocd"
+  create_namespace = true
+
+  values = [file("${path.module}/values/argocd.yaml")]
+
+  # Applied means running: its CRDs and controller have to be ready before
+  # anything is pointed at them.
+  wait    = true
+  timeout = 900
+
+  depends_on = [helm_release.lbc]
+}
+
 resource "helm_release" "api" {
   name      = "godough-api"
   chart     = "${local.charts}/api"
