@@ -20,6 +20,10 @@ metadata:
     # share one ALB group, so this has to agree on both or the listener is left
     # alone with a conflict warning.
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # The ALB's DNS name is a Cloudflare record, so losing the load balancer is a
+    # longer outage than it looks. Both Ingresses share one ALB group, so this has
+    # to agree on both or the controller leaves the attribute alone.
+    alb.ingress.kubernetes.io/load-balancer-attributes: deletion_protection.enabled=true
     alb.ingress.kubernetes.io/certificate-arn: {{ required "ingress.certificateArn is required when ingress is enabled" .Values.ingress.certificateArn }}
     alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheckPath }}
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: '15'
