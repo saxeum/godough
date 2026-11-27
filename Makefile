@@ -331,8 +331,12 @@ rds-app-password: ## [host] Create the godough_app password in Secrets Manager (
 # re-run after a rotation is the smaller thing; when a second workload needs the
 # same credential, the operator starts to pay for itself.
 K8S_NAMESPACE ?= godough
+# What Google will redirect back to. Must match the authorised redirect URI in the
+# Google console exactly, or the callback fails after the user has already
+# consented — which reads as a sign-in bug rather than a configuration mismatch.
+EDGE_URL ?= https://godough.foonix.net
 
-k8s-secrets: ## [host] Create the DSN and CA Secrets in the cluster (needs the EKS tunnel)
+k8s-secrets: ## [host] Create the DSN, CA and sign-in Secrets in the cluster (needs the EKS tunnel)
 	@test -f global-bundle.pem || { echo "download global-bundle.pem first: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"; exit 1; }
 	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
 	@kubectl create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -343,6 +347,16 @@ k8s-secrets: ## [host] Create the DSN and CA Secrets in the cluster (needs the E
 	   --from-literal=DATABASE_URL="$$dsn" --dry-run=client -o yaml | kubectl apply -f - ; \
 	 kubectl -n $(K8S_NAMESPACE) create secret generic godough-rds-ca \
 	   --from-file=global-bundle.pem=./global-bundle.pem --dry-run=client -o yaml | kubectl apply -f - ; \
+	 if [ -n "$$GOOGLE_CLIENT_ID" ] && [ -n "$$GOOGLE_CLIENT_SECRET" ]; then \
+	   kubectl -n $(K8S_NAMESPACE) create secret generic godough-oauth \
+	     --from-literal=GOOGLE_CLIENT_ID="$$GOOGLE_CLIENT_ID" \
+	     --from-literal=GOOGLE_CLIENT_SECRET="$$GOOGLE_CLIENT_SECRET" \
+	     --from-literal=GOOGLE_REDIRECT_URL="$(EDGE_URL)/api/auth/google/callback" \
+	     --dry-run=client -o yaml | kubectl apply -f - ; \
+	   echo "godough-oauth is in $(K8S_NAMESPACE), redirecting to $(EDGE_URL)/api/auth/google/callback"; \
+	 else \
+	   echo "GOOGLE_CLIENT_ID/SECRET are empty: sign-in stays disabled"; \
+	 fi; \
 	 echo "godough-api and godough-rds-ca are in $(K8S_NAMESPACE); re-run this after rotating the password"
 
 rds-bootstrap: ## [host] Create godough_app on RDS from its Secrets Manager password

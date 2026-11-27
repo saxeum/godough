@@ -7,6 +7,9 @@ locals {
       digest     = var.api_digest
     }
     trustedOrigins = var.trusted_origins
+    # The sign-in Secret is created by make k8s-secrets from the environment; the
+    # chart only names it.
+    oauthSecret = { name = "godough-oauth" }
     ingress = {
       enabled        = true
       host           = var.domain

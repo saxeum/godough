@@ -49,7 +49,7 @@ variable "ui_digest" {
 variable "trusted_origins" {
   description = "Exact origin the UI is served from, for the API's CSRF check. Empty disables the browser flows that need it."
   type        = string
-  default     = ""
+  default     = "https://godough.foonix.net"
 }
 
 variable "domain" {

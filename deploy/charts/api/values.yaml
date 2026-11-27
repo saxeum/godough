@@ -21,8 +21,11 @@ caSecret:
   mountPath: /certs
 # Google sign-in is all-or-none: a partial set is a boot error, so these keys are
 # optional and a Secret without them runs with sign-in disabled.
+# Separate from the database Secret: the sign-in credentials come from a Google
+# project, not from Secrets Manager, and `make k8s-secrets` writes this one from
+# the environment.
 oauthSecret:
-  name: godough-api
+  name: godough-oauth
   clientIDKey: GOOGLE_CLIENT_ID
   clientSecretKey: GOOGLE_CLIENT_SECRET
   redirectURLKey: GOOGLE_REDIRECT_URL

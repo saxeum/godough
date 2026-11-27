@@ -100,6 +100,37 @@ distribution, and CloudFront needs **its own certificate in `us-east-1`** — a
 regional ACM certificate cannot be attached to a distribution. That is why the
 certificate here is explicitly regional.
 
+### Sign-in on the edge
+
+```
+make k8s-secrets
+```
+
+also writes `godough-oauth` from `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in
+the environment, with `GOOGLE_REDIRECT_URL` built from `EDGE_URL`
+(`https://godough.foonix.net/api/auth/google/callback` by default). The chart
+references that Secret with `optional: true` on each key, so a cluster without
+sign-in credentials boots with sign-in disabled rather than failing to start.
+
+Two things have to agree with Google's console, and only one of them is in this
+repository:
+
+1. The **authorised redirect URI** must contain exactly
+   `https://godough.foonix.net/api/auth/google/callback`. If it does not, the
+   flow fails after the user has already consented, on Google's page, with
+   `redirect_uri_mismatch`.
+2. `TRUSTED_ORIGINS` must contain `https://godough.foonix.net`, or the API's CSRF
+   check rejects the callback. It is `trusted_origins` in the stack, and it does
+   not accept wildcards.
+
+```
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://godough.foonix.net/api/auth/google
+```
+`302 https://accounts.google.com/o/oauth2/v2/auth?...` means the client ID and
+secret reached the pod. `503 {"error":"sign-in is not configured"}` means they
+did not — that is the server saying the Secret is missing or incomplete, not a
+problem with the redirect URI.
+
 ### Verified on the live edge
 
 ```

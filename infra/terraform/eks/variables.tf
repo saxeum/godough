@@ -23,9 +23,9 @@ variable "node_instance_types" {
 }
 
 variable "node_desired_size" {
-  description = "Nodes to run. One, because staging serves nobody."
+  description = "Nodes to run. Two, because t3.small allows 11 pods and a rolling update needs one more than is running: at one node every rollout, and every migration Job (#115), fails to schedule with 'Too many pods'."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "node_min_size" {
