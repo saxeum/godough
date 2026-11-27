@@ -42,7 +42,7 @@ COVER_GENERATED := internal/transport/httpapi/openapi.gen.go
 # the database is `postgres:5432` inside the network and 127.0.0.1:5432 outside.
 
 .DEFAULT_GOAL := help
-.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql eks-tunnel eks-kubeconfig charts-lint
+.PHONY: help build run ui-install ui-dev ui-build test test-unit test-race e2e cover cover-raw vet lint tls-check vuln vuln-images vuln-binary deps deps-image deps-build deps-graph why symbols fmt clean db-up stack-up down db-bootstrap db-migrate db-test test-db-reset rds-app-password rds-bootstrap codegen codegen-go codegen-ts codegen-check aws-test ecr-login ecr-build ecr-push ecr-pull-test rds-tunnel rds-psql k8s-secrets eks-tunnel eks-kubeconfig charts-lint image-digests
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -243,6 +243,14 @@ eks-tunnel: ## [host] Forward the private EKS API to localhost:6443 through SSM
 	 echo "forwarding $$host:443 to 127.0.0.1:6443 through $$target; leave this running, ^C to stop"; \
 	 aws ssm start-session --region $(AWS_REGION) --target "$$target" --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host="$$host",portNumber="443",localPortNumber="6443"
 
+image-digests: ## [host] Print the newest published tag and image digests
+	@for repo in godough-api godough-web; do \
+	  aws ecr describe-images --region $(AWS_REGION) --repository-name $$repo \
+	    --query 'reverse(sort_by(imageDetails[?imageTags],&imagePushedAt))[0].[imageTags[0],imageDigest]' --output text \
+	    | awk -v r="$$repo" '{printf "%-14s %-42s %s\n", r, $$1, $$2}'; \
+	done
+	@echo "newest published, which is not necessarily origin/master: a merge that publishes nothing leaves no image"
+
 eks-kubeconfig: ## [host] Point kubectl at the tunnel above, as context godough-staging
 	@endpoint=$$(terraform -chdir=$(TF_EKS) output -raw cluster_endpoint); \
 	 host=$${endpoint#https://}; \
@@ -316,8 +324,30 @@ rds-app-password: ## [host] Create the godough_app password in Secrets Manager (
 # Runs as the master, through the tunnel, because the role is cluster-scoped and
 # only the owner may create it. The password comes from Secrets Manager, not from
 # this file.
+# The two Secrets the api chart needs, created from Secrets Manager and the CA
+# bundle. Imperative on purpose: External Secrets or the Secrets Store CSI driver
+# would sync these automatically, and both cost an operator, a CRD and an IRSA
+# role. With one consumer and one operator, a documented command that has to be
+# re-run after a rotation is the smaller thing; when a second workload needs the
+# same credential, the operator starts to pay for itself.
+K8S_NAMESPACE ?= godough
+
+k8s-secrets: ## [host] Create the DSN and CA Secrets in the cluster (needs the EKS tunnel)
+	@test -f global-bundle.pem || { echo "download global-bundle.pem first: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"; exit 1; }
+	@kubectl version --request-timeout=3s >/dev/null 2>&1 || { echo "cannot reach the cluster: run 'make eks-tunnel' in another terminal"; exit 1; }
+	@kubectl create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+	@app=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id $(APP_PASSWORD_SECRET) --query SecretString --output text | jq -r .password); \
+	 endpoint=$$(terraform -chdir=$(TF_DATA) output -raw rds_endpoint | cut -d: -f1); \
+	 dsn="postgres://godough_app:$$app@$$endpoint/godough?sslmode=verify-full&sslrootcert=/certs/global-bundle.pem&pool_max_conns=5"; \
+	 kubectl -n $(K8S_NAMESPACE) create secret generic godough-api \
+	   --from-literal=DATABASE_URL="$$dsn" --dry-run=client -o yaml | kubectl apply -f - ; \
+	 kubectl -n $(K8S_NAMESPACE) create secret generic godough-rds-ca \
+	   --from-file=global-bundle.pem=./global-bundle.pem --dry-run=client -o yaml | kubectl apply -f - ; \
+	 echo "godough-api and godough-rds-ca are in $(K8S_NAMESPACE); re-run this after rotating the password"
+
 rds-bootstrap: ## [host] Create godough_app on RDS from its Secrets Manager password
 	@test -f global-bundle.pem || { echo "download global-bundle.pem first: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"; exit 1; }
+	@pg_isready -h 127.0.0.1 -p 15432 -q || { echo "nothing is listening on 15432: run 'make rds-tunnel' in another terminal"; exit 1; }
 	@secret=$$(terraform -chdir=$(TF_DATA) output -raw master_user_secret_arn); \
 	 master=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id "$$secret" --query SecretString --output text | jq -r .password); \
 	 app=$$(aws secretsmanager get-secret-value --region $(AWS_REGION) --secret-id $(APP_PASSWORD_SECRET) --query SecretString --output text | jq -r .password); \
