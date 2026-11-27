@@ -43,8 +43,21 @@ create them and must not: one holds a database password, the other a CA bundle.
 
 | Secret | Key | From |
 |---|---|---|
-| `godough-api` | `DATABASE_URL` | `make rds-app-password`, then the synced DSN (#125 decides the sync) |
-| `godough-rds-ca` | `global-bundle.pem` | the RDS global bundle, `global-bundle.pem` in the repo root |
+| `godough-api` | `DATABASE_URL` | `make k8s-secrets`, which reads `godough-staging/app-password` |
+| `godough-rds-ca` | `global-bundle.pem` | `make k8s-secrets`, from `global-bundle.pem` in the repo root |
+
+```
+make k8s-secrets
+```
+
+Creates both, and the namespace. It is imperative rather than synced: External
+Secrets or the Secrets Store CSI driver would keep them current by themselves, and
+each costs an operator, a CRD and an IRSA role. For one consumer and one operator,
+a command that has to be re-run after a rotation is the smaller thing; that
+trade-off is worth revisiting when a second workload needs the same credential.
+
+It also refuses to run without `make eks-tunnel`, because a `kubectl` that cannot
+reach the API and a cluster that is down look identical from the outside.
 
 `wait = true` on both releases is deliberate: applied means running, not merely
 submitted. A missing Secret therefore fails the apply after the timeout instead
