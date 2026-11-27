@@ -123,8 +123,10 @@ func (s *Server) Routes() http.Handler {
 
 	// Outside, not inside: the generated handler reads the body before any of its
 	// own middleware sees the request. Outermost first, so a panic anywhere below
-	// is recovered, and the deadline covers everything that follows.
-	return withRequestID(accessLog(s.log, recoverer(s.log, requestDeadline(RequestTimeout, mux))))
+	// is recovered, and the deadline covers everything that follows. noStore sits
+	// innermost so every response the mux can produce — including the ones the
+	// generated handlers write themselves — carries the directive.
+	return withRequestID(accessLog(s.log, recoverer(s.log, requestDeadline(RequestTimeout, noStore(mux)))))
 }
 
 // healthz says the process is alive. It must not touch the database: a database
